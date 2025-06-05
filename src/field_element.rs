@@ -1,12 +1,9 @@
-use std::{
-    num,
-    ops::{Add, Mul, Sub},
-};
+use std::ops::{Add, Mul, Sub};
 
 use anyhow::{Ok, bail};
 
 #[derive(Debug, Eq, PartialEq)]
-struct FieldElement {
+pub struct FieldElement {
     n: u64,
     prime: u64,
 }
@@ -69,7 +66,7 @@ impl Mul for FieldElement {
     }
 }
 
-trait Pow<EXP = u32> {
+pub trait Pow<EXP = u64> {
     type Output;
 
     fn pow(self, rhs: EXP) -> Self::Output;
@@ -78,13 +75,29 @@ trait Pow<EXP = u32> {
 impl Pow for FieldElement {
     type Output = Self;
 
-    fn pow(self, exp: u32) -> Self::Output {
-        let result = self.n.pow(exp) % self.prime;
+    fn pow(self, exp: u64) -> Self::Output {
+        let result = mod_pow(self.n, exp, self.prime);
         Self {
             n: result,
             prime: self.prime,
         }
     }
+}
+
+fn mod_pow(mut base: u64, mut exp: u64, modulus: u64) -> u64 {
+    if modulus == 1 {
+        return 0;
+    }
+    let mut result = 1;
+    base = base % modulus;
+    while exp > 0 {
+        if exp % 2 == 1 {
+            result = result * base % modulus;
+        }
+        exp = exp >> 1;
+        base = base * base % modulus;
+    }
+    result
 }
 
 #[cfg(test)]
