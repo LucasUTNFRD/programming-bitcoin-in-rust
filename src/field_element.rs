@@ -1,4 +1,4 @@
-use std::ops::{Add, Mul, Sub};
+use std::ops::{Add, Div, Mul, Sub};
 
 use anyhow::{Ok, bail};
 
@@ -66,7 +66,7 @@ impl Mul for FieldElement {
     }
 }
 
-pub trait Pow<EXP = u64> {
+pub trait Pow<EXP = i64> {
     type Output;
 
     fn pow(self, rhs: EXP) -> Self::Output;
@@ -75,8 +75,9 @@ pub trait Pow<EXP = u64> {
 impl Pow for FieldElement {
     type Output = Self;
 
-    fn pow(self, exp: u64) -> Self::Output {
-        let result = mod_pow(self.n, exp, self.prime);
+    fn pow(self, exp: i64) -> Self::Output {
+        let exp = if exp < 0 { -exp } else { exp };
+        let result = mod_pow(self.n, exp as u64, self.prime);
         Self {
             n: result,
             prime: self.prime,
@@ -98,6 +99,15 @@ fn mod_pow(mut base: u64, mut exp: u64, modulus: u64) -> u64 {
         base = base * base % modulus;
     }
     result
+}
+
+impl Div for FieldElement {
+    type Output = Self;
+    fn div(self, rhs: Self) -> Self::Output {
+        // a/b=a *f (1/b) = a *f b^-1
+        let p = self.prime;
+        self * rhs.pow((p - 2) as i64)
+    }
 }
 
 #[cfg(test)]
@@ -219,6 +229,27 @@ mod tests {
 
         let result = a.pow(3);
         assert_eq!(result, b)
+    }
+
+    #[test]
+    fn test_field_element_pow_neg_number() {
+        let prime = 13;
+        let a = FieldElement::new(3, prime).unwrap();
+        let b = FieldElement::new(1, prime).unwrap();
+
+        let result = a.pow(-3);
+        assert_eq!(result, b)
+    }
+
+    #[test]
+    fn test_field_element_division_op() {
+        let prime = 19;
+        let a = FieldElement::new(2, prime).unwrap();
+        let b = FieldElement::new(7, prime).unwrap();
+        let result = a / b;
+        let expected_result = FieldElement::new(3, prime).unwrap();
+
+        assert_eq!(result, expected_result);
     }
 
     #[test]
