@@ -5,7 +5,7 @@ mod field_element;
 fn generate_Fp_ex_7(prime: u64) -> Vec<FieldElement> {
     // construct vec from 1..p-1 of all the elem to p-1
     (1..prime)
-        .map(|n| FieldElement::new(n, prime).unwrap().pow((prime - 1) as i64))
+        .map(|n| FieldElement::new(n, prime).unwrap().pow(prime - 1))
         .collect()
 }
 
