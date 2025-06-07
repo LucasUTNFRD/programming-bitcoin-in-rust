@@ -3,7 +3,7 @@ use std::{
     ops::{Add, Mul, Neg, Sub},
 };
 
-use super::field_element::FieldParameter;
+use super::field_element::FiniteField;
 
 pub trait G1Point:
     Copy                // Representation small enough for efficient copy
@@ -17,8 +17,8 @@ pub trait G1Point:
     + Mul<Self::SubField, Output = Self>
     // Mathemetical Operations ----
 {
-    type Field: FieldParameter; // The field containg x,y coordinates
-    type SubField: FieldParameter; //The scalar field for multiplication
+    type Field: FiniteField; // The field containg x,y coordinates
+    type SubField: FiniteField; //The scalar field for multiplication
 
     /// Constructor
     fn new(x: Self::Field, y: Self::Field) -> Self;

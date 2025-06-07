@@ -47,7 +47,7 @@ pub trait FieldParameter: Copy + Debug {
     const MODULUS: U256;
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct FieldElement<P: FieldParameter> {
     value: U256,
     _phantom: std::marker::PhantomData<P>,
