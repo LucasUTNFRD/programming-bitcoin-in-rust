@@ -67,17 +67,20 @@ impl<P: FieldParameter> FieldElement<P> {
     }
 }
 
-fn mod_exp(base: U256, exp: U256, modulus: U256) -> U256 {
-    // Convert U256 to BigUint
-    let base_bytes = U256::to_big_endian(&base);
-    // let exp_bytes = exp.to_be_bytes();
-    let exp_bytes = U256::to_big_endian(&exp);
-    // let modulus_bytes = modulus.to_be_bytes();
-    let modulus_bytes = U256::to_big_endian(&modulus);
+fn u256_to_biguint(u: U256) -> BigUint {
+    let base_bytes = U256::to_big_endian(&u);
+    BigUint::from_bytes_be(&base_bytes)
+}
 
-    let base_biguint = BigUint::from_bytes_be(&base_bytes);
-    let exp_biguint = BigUint::from_bytes_be(&exp_bytes);
-    let modulus_biguint = BigUint::from_bytes_be(&modulus_bytes);
+fn biguint_to_u256(b: BigUint) -> U256 {
+    let bytes = b.to_bytes_be();
+    U256::from_big_endian(&bytes)
+}
+
+fn mod_exp(base: U256, exp: U256, modulus: U256) -> U256 {
+    let base_biguint = u256_to_biguint(base);
+    let exp_biguint = u256_to_biguint(exp);
+    let modulus_biguint = u256_to_biguint(modulus);
 
     // Perform modular exponentiation with BigUint
     let result_biguint = base_biguint.modpow(&exp_biguint, &modulus_biguint);
@@ -147,8 +150,11 @@ impl<P: FieldParameter> Add for FieldElement<P> {
     type Output = Self;
 
     fn add(self, rhs: Self) -> Self::Output {
-        let sum = (self.value + rhs.value) % P::MODULUS;
-        Self::new(sum)
+        let a = u256_to_biguint(self.value);
+        let b = u256_to_biguint(rhs.value);
+        let modulus = u256_to_biguint(P::MODULUS);
+        let sum = (a + b) % modulus;
+        Self::new(biguint_to_u256(sum))
     }
 }
 
@@ -162,13 +168,21 @@ impl<P: FieldParameter> Sub for FieldElement<P> {
     type Output = Self;
 
     fn sub(self, rhs: Self) -> Self::Output {
-        let modulus = P::MODULUS;
-        let diff = if self.value >= rhs.value {
-            self.value - rhs.value
+        // let modulus = P::MODULUS;
+        // let diff = if self.value >= rhs.value {
+        //     self.value - rhs.value
+        // } else {
+        //     modulus - (rhs.value - self.value)
+        // };
+        let a = u256_to_biguint(self.value);
+        let b = u256_to_biguint(rhs.value);
+        let modulus = u256_to_biguint(P::MODULUS);
+        let diff = if a > b {
+            (a - b) % modulus
         } else {
-            modulus - (rhs.value - self.value)
+            (&modulus - (b - a)) % &modulus
         };
-        Self::new(diff)
+        Self::new(biguint_to_u256(diff))
     }
 }
 
@@ -182,26 +196,13 @@ impl<P: FieldParameter> Mul for FieldElement<P> {
     type Output = Self;
 
     fn mul(self, rhs: Self) -> Self::Output {
-        // Use BigUint to prevent overflow during multiplication
-        let modulus = P::MODULUS;
-
-        let mut self_bytes = [0u8; 32];
-        let mut rhs_bytes = [0u8; 32];
-        let mut mod_bytes = [0u8; 32];
-
-        self_bytes.copy_from_slice(&self.value.to_big_endian());
-        rhs_bytes.copy_from_slice(&rhs.value.to_big_endian());
-        mod_bytes.copy_from_slice(&modulus.to_big_endian());
-
-        let self_big = BigUint::from_bytes_be(&self_bytes);
-        let rhs_big = BigUint::from_bytes_be(&rhs_bytes);
-        let mod_big = BigUint::from_bytes_be(&mod_bytes);
+        let self_big = u256_to_biguint(self.value);
+        let rhs_big = u256_to_biguint(rhs.value);
+        let mod_big = u256_to_biguint(P::MODULUS);
 
         let result_big = (self_big * rhs_big) % mod_big;
-        let result_bytes = result_big.to_bytes_be();
-        let result = U256::from_big_endian(&result_bytes);
 
-        Self::new(result)
+        Self::new(biguint_to_u256(result_big))
     }
 }
 

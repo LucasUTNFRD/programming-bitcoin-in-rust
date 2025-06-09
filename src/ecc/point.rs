@@ -3,7 +3,15 @@ use std::{
     ops::{Add, Mul, Neg, Sub},
 };
 
+use thiserror::Error;
+
 use super::field_element::FiniteField;
+
+#[derive(Debug, Error)]
+pub enum Error {
+    #[error("Coordinate not in curve")]
+    CoordinateNotInCurve,
+}
 
 pub trait G1Point:
     Copy                // Representation small enough for efficient copy
@@ -21,7 +29,7 @@ pub trait G1Point:
     type SubField: FiniteField; //The scalar field for multiplication
 
     /// Constructor
-    fn new(x: Self::Field, y: Self::Field) -> Self;
+    fn new(x: Self::Field, y: Self::Field) -> Result<Self,Error>;
 
     /// Provide generator element
     fn generator() -> Self;
@@ -31,7 +39,4 @@ pub trait G1Point:
     /// Check wheter current point is an identity point
     fn is_identity(&self) -> bool;
 
-    /// Provide the x and y coordinates of the point
-    fn x(&self) -> &Self::Field;
-    fn y(&self) -> &Self::Field;
 }
