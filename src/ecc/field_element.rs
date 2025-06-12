@@ -67,17 +67,18 @@ impl<P: FieldParameter> FieldElement<P> {
     }
 }
 
-fn u256_to_biguint(u: U256) -> BigUint {
+pub fn u256_to_biguint(u: U256) -> BigUint {
     let base_bytes = U256::to_big_endian(&u);
     BigUint::from_bytes_be(&base_bytes)
 }
 
-fn biguint_to_u256(b: BigUint) -> U256 {
+pub fn biguint_to_u256(b: BigUint) -> U256 {
     let bytes = b.to_bytes_be();
+    dbg!(&bytes.len());
     U256::from_big_endian(&bytes)
 }
 
-fn mod_exp(base: U256, exp: U256, modulus: U256) -> U256 {
+pub fn mod_exp(base: U256, exp: U256, modulus: U256) -> U256 {
     let base_biguint = u256_to_biguint(base);
     let exp_biguint = u256_to_biguint(exp);
     let modulus_biguint = u256_to_biguint(modulus);
@@ -145,6 +146,17 @@ impl<P: FieldParameter> FiniteField for FieldElement<P> {
     }
 }
 
+/// util function for signature verification where we use an specific inverse using as modulus the
+/// order of the group
+pub fn mul_and_mod(lhs: U256, rhs: U256, modulus: U256) -> U256 {
+    let self_big = u256_to_biguint(lhs);
+    let rhs_big = u256_to_biguint(rhs);
+    let mod_big = u256_to_biguint(modulus);
+
+    let result_big = (self_big * rhs_big) % mod_big;
+    biguint_to_u256(result_big)
+}
+
 // Arithmetic Operations
 impl<P: FieldParameter> Add for FieldElement<P> {
     type Output = Self;
@@ -200,7 +212,7 @@ impl<P: FieldParameter> Mul for FieldElement<P> {
         let rhs_big = u256_to_biguint(rhs.value);
         let mod_big = u256_to_biguint(P::MODULUS);
 
-        let result_big = (self_big * rhs_big) % mod_big;
+        let result_big = dbg!(self_big * rhs_big) % mod_big;
 
         Self::new(biguint_to_u256(result_big))
     }

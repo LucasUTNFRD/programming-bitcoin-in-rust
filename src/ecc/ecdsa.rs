@@ -3,12 +3,12 @@ use std::{fmt::Display, ops::Div};
 use crate::ecc::point::G1Point;
 
 use super::{
-    field_element::FiniteField,
+    field_element::{FiniteField, biguint_to_u256, mod_exp, mul_and_mod, u256_to_biguint},
     secp256k1::{F256K1, G1AffinityPoint},
 };
 use hmac::{Hmac, Mac};
 use primitive_types::U256;
-use sha2::Sha256;
+use sha2::{Digest, Sha256};
 /// Represents an ECDSA signature, consisting of two scalar values, r and s.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Signature {
@@ -33,10 +33,6 @@ impl Signature {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PrivateKey {
     secret: F256K1,
-
-    /// Represents a secp256k1 public key.
-    /// It's a point on the elliptic curve.
-    pub publick_key: PublicKey,
 }
 
 type HmacSha256 = Hmac<Sha256>;
@@ -47,7 +43,16 @@ impl PrivateKey {
         let g = G1AffinityPoint::generator();
         Self {
             secret,
-            publick_key: PublicKey::new(g * secret),
+            // publick_key: PublicKey::new(g * secret),
+        }
+    }
+
+    /// Derives the public key corresponding to this private key.
+    /// pubKey = privateKey * G (where G is the generator point)
+    pub fn public_key(&self) -> PublicKey {
+        let generator = G1AffinityPoint::generator();
+        PublicKey {
+            point: generator * self.secret,
         }
     }
 
@@ -59,51 +64,25 @@ impl PrivateKey {
     /// # Returns
     /// An `Signature`
     pub fn sign(&self, message_hash: U256) -> Option<Signature> {
-        let n = G1AffinityPoint::N; // Order of the generator point (scalar field modulus)
+        let n = G1AffinityPoint::N;
+        let k =
+            Self::generate_deterministic_k_scalar(self.secret.as_u256(), message_hash, n).unwrap();
 
-        //Convert message_hash to a field element of the scalar field (F256K1)
-        let z = F256K1::new(message_hash);
+        let k_inv = mod_exp(k, n - 2, n);
 
-        // Generate k deterministically using the new module
-        let k_candidate =
-            Self::generate_deterministic_k_scalar(self.secret.as_u256(), message_hash, n)?;
+        let r = (G1AffinityPoint::generator() * k.into()).x().as_u256();
 
-        let k_field = F256K1::new(k_candidate);
+        // Calculate s = (z + r * e) * k_inv % N
+        let z_big = u256_to_biguint(message_hash);
+        let r_big = u256_to_biguint(r);
+        let e_big = u256_to_biguint(self.secret.as_u256());
+        let k_inv_big = u256_to_biguint(k_inv);
+        let n_big = u256_to_biguint(n);
+        let s = biguint_to_u256((z_big + r_big * e_big) * k_inv_big % n_big);
 
-        let generator = G1AffinityPoint::generator();
-        let r_point = generator * k_field;
+        let final_s = if s > n / 2 { n - s } else { s };
 
-        // If r_point is the point at infinity, this k value is not suitable.
-        // This only happens if k_field is equal to N
-        if r_point.is_identity() {
-            eprintln!("Error: r_point is identity. Cannot sign with this k.");
-            return None;
-        }
-
-        let r = F256K1::new(r_point.x().as_u256() % n);
-        if r.is_zero() {
-            eprintln!("Error: r is zero. Cannot sign.");
-            return None;
-        }
-
-        let s = (z + r * self.secret)
-            .div(k_field)
-            .expect("Error: k_field  has no inverse, cannot sign");
-
-        let half_n = n / 2;
-        let s_val = s.as_u256();
-        let s_final = if s_val > half_n {
-            F256K1::new(n - s_val)
-        } else {
-            s
-        };
-
-        if s_final.is_zero() {
-            eprintln!("Error: s is zero after low-s normalization. Cannot sign.");
-            return None;
-        }
-
-        Some(Signature { r, s: s_final })
+        Some(Signature::new(r.into(), final_s.into()))
     }
 
     /// Generates a deterministic 'k' scalar for ECDSA signing according to RFC 6979.
@@ -207,46 +186,39 @@ impl PublicKey {
     // Add the verify_signature method here
     pub fn verify_signature(&self, message_hash: U256, signature: &Signature) -> bool {
         let n = G1AffinityPoint::N;
-        let z = F256K1::from(message_hash);
-        let u = z.div(signature.s).unwrap().as_u256() % n;
-        let u = F256K1::from(u);
-        let v = signature.r.div(signature.s).unwrap().as_u256() % n;
-        let v = F256K1::from(v);
-        let g = G1AffinityPoint::generator();
-        let total = g * u + self.point * v;
-        total.x().as_u256() == signature.r.as_u256()
+
+        let s_inv = mod_exp(
+            signature.s.as_u256(),
+            G1AffinityPoint::N - 2,
+            G1AffinityPoint::N,
+        );
+        let u = mul_and_mod(message_hash, s_inv, n);
+        let v = mul_and_mod(signature.r.as_u256(), s_inv, n);
+        let total = G1AffinityPoint::generator() * u.into() + self.point * v.into();
+        total.x() == signature.r
     }
+}
+
+///The hash256() function in Bitcoin programming contexts typically refers to double SHA256, which is used extensively in Bitcoin for security reasons. This double hashing helps prevent certain types of cryptographic attacks
+pub fn hash256(data: &[u8]) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update(data);
+    let first_hash = hasher.finalize();
+
+    let mut hasher2 = Sha256::new();
+    hasher2.update(first_hash);
+    let double_hash = hasher2.finalize();
+
+    double_hash.into()
 }
 
 #[cfg(test)]
 mod test {
     use sha2::Digest;
 
+    use crate::ecc::field_element::{biguint_to_u256, mod_exp, mul_and_mod, u256_to_biguint};
+
     use super::*;
-
-    #[test]
-    fn test_simple_signature_verification() {
-        // Simple test to ensure basic sign and verify works
-        let private_key_scalar = U256::from(42); // A simple private key scalar
-        let private_key = PrivateKey::new(private_key_scalar);
-        let public_key = private_key.publick_key;
-
-        let message = b"Test message for simple verification.";
-        let mut hasher = Sha256::new();
-        hasher.update(message);
-        let message_hash = U256::from_big_endian(&hasher.finalize());
-
-        let signature = private_key
-            .sign(message_hash)
-            .expect("Signing failed in simple test");
-
-        let is_valid = public_key.verify_signature(message_hash, &signature);
-        assert!(is_valid, "Simple signature verification failed");
-        println!(
-            "Simple signature verification passed for message: {:?}",
-            String::from_utf8_lossy(message)
-        );
-    }
 
     #[test]
     fn test_rfc6979_k_reproducibility() {
@@ -301,27 +273,213 @@ mod test {
         // Convert scalars to F256K1 field elements
         let z = F256K1::new(z_scalar);
         let r = F256K1::new(r_scalar);
-        let s = F256K1::new(s_scalar);
+        // let s = F256K1::new(s_scalar);
         let px = F256K1::new(px_scalar);
         let py = F256K1::new(py_scalar);
+        let n = G1AffinityPoint::N;
+        let g = G1AffinityPoint::generator();
+        // dbg!(z, r, s, px, py);
 
         let public_key_point = G1AffinityPoint::new(px, py).expect("Point not in curve");
 
-        // Calculate u = z * s_inv % N
-        let u = z.div(s).expect("s should have an inverse");
+        // >>> s_inv = pow(s, N-2, N)  # <1>
+        let s_inv = mod_exp(s_scalar, G1AffinityPoint::N - 2, G1AffinityPoint::N);
+        let expect_s_inv = U256::from_str_radix(
+            "0xb83305e1d30225f64091c2cb21aa08e938cea1b3ffbdc9397ff139411c21ccc5",
+            16,
+        )
+        .unwrap();
+        assert_eq!(s_inv, expect_s_inv);
 
-        // Calculate v = r * s_inv % N
-        let v = r.div(s).expect("s should have inverse");
+        let expected_u = U256::from_str_radix(
+            "0x35833101b5a69ad2433064be2790cbe7d932dfcd5220ce787b6b547ea26b6f7e",
+            16,
+        )
+        .unwrap();
 
-        // Get the generator point G
+        // >>> u = z * s_inv % N  # <2>
+        let u = mul_and_mod(z_scalar, s_inv, n);
+
+        assert_eq!(u, expected_u);
+        //
+        // >>> v = r * s_inv % N  # <3>
+        let expected_v = U256::from_str_radix(
+            "0x7e375e66cdf9ee88ec757e65fe3eacc5847819e89586d140c52f6f02797662c",
+            16,
+        )
+        .unwrap();
+        let v = mul_and_mod(r_scalar, s_inv, n);
+        assert_eq!(v, expected_v);
+
+        // >>> print((u*G + v*point).x.num == r)  # <4>
+        let total = g * u.into() + public_key_point * v.into();
+        assert_eq!(total.x(), r)
+    }
+
+    #[test]
+    fn test_ecdsa_signature_verification() {
+        // 1. Generate a private key
+        let private_key_scalar =
+            U256::from("1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef");
+
+        let private_key = PrivateKey::new(private_key_scalar);
+
+        // 2. Derive the public key from the private key
+        let public_key = private_key.public_key(); // Corrected: calling method on PrivateKey instance
+
+        // 3. Define a message and hash it
+        let message = b"Hello, world!";
+        let mut hasher = Sha256::new();
+        hasher.update(message);
+        let message_hash_bytes = hasher.finalize();
+        let message_hash = U256::from_big_endian(&message_hash_bytes); // This is 'z'
+
+        // 4. Sign the message hash (k is now generated deterministically internally)
+        let signature = private_key.sign(message_hash).expect("Signature failed");
+
+        dbg!("Original Message: {:?}", String::from_utf8_lossy(message));
+        dbg!("Message Hash: 0x{:x}", message_hash);
+        dbg!("Private Key Scalar: 0x{:x}", private_key.secret.as_u256());
+        dbg!("Public Key Point: {}", public_key.point); // Access the point field of PublicKey
+        dbg!(
+            "Signature (r, s): (0x{:x}, 0x{:x})",
+            signature.r.as_u256(),
+            signature.s.as_u256()
+        );
+
+        // 5. Verify the signature using the PublicKey instance
+        let is_valid = public_key.verify_signature(message_hash, &signature);
+        dbg!("Signature valid: {}", is_valid);
+        assert!(
+            is_valid,
+            "Signature should be valid for the original message"
+        );
+
+        // Test with a tampered message
+        let tampered_message = b"Hello, earth!";
+        let mut tampered_hasher = Sha256::new();
+        tampered_hasher.update(tampered_message);
+        let tampered_message_hash_bytes = tampered_hasher.finalize();
+        let tampered_message_hash = U256::from_big_endian(&tampered_message_hash_bytes);
+
+        let is_tampered_valid = public_key.verify_signature(tampered_message_hash, &signature);
+        dbg!(
+            "Tampered Message: {:?}",
+            String::from_utf8_lossy(tampered_message)
+        );
+        dbg!("Tampered Message Hash: 0x{:x}", tampered_message_hash);
+        dbg!("Tampered signature valid: {}", is_tampered_valid);
+        assert!(
+            !is_tampered_valid,
+            "Signature should be invalid for a tampered message"
+        );
+
+        // Test with a tampered signature (e.g., change r)
+        let mut bad_signature = signature;
+        // Increment r, ensuring it stays within the field if possible for a subtle change
+        bad_signature.r = F256K1::new((signature.r.as_u256() + U256::from(1)) % G1AffinityPoint::N);
+        let is_bad_signature_valid = public_key.verify_signature(message_hash, &bad_signature);
+        dbg!(
+            "Bad Signature (r changed) valid: {}",
+            is_bad_signature_valid
+        );
+        assert!(
+            !is_bad_signature_valid,
+            "Signature should be invalid if r is changed"
+        );
+    }
+    //
+    #[test]
+    fn test_signature_from_book() {
+        // >>> e = 12345
+        // >>> z = int.from_bytes(hash256(b'Programming Bitcoin!'), 'big')
+        // >>> k = 1234567890
+        // >>> r = (k*G).x.num
+        // >>> k_inv = pow(k, N-2, N)
+        // >>> s = (z+r*e) * k_inv % N
+        // >>> print(e*G)
+        // S256Point(f01d6b9018ab421dd410404cb869072065522bf85734008f105cf385a023a80f, \
+        // 0eba29d0f0c5408ed681984dc525982abefccd9f7ff01dd26da4999cf3f6a295)
+        // >>> print(hex(z))
+        // 0x969f6056aa26f7d2795fd013fe88868d09c9f6aed96965016e1936ae47060d48
+        // >>> print(hex(r))
+        // 0x2b698a0f0a4041b77e63488ad48c23e8e8838dd1fb7520408b121697b782ef22
+        // >>> print(hex(s))
+        // 0x1dbc63bfef4416705e602a7b564161167076d8b20990a0f26f316cff2cb0bc1a
+
+        let private_key_scalar = U256::from(12345);
+        let k_scalar = U256::from(1234567890);
+
+        // Hash the message "Programming Bitcoin!"
+        let message = b"Programming Bitcoin!";
+        let hashed_message = hash256(message);
+        let z_scalar = U256::from_big_endian(&hashed_message);
+        // Expected values from the book's Python output
+        let expected_z_scalar = U256::from_str_radix(
+            "0x969f6056aa26f7d2795fd013fe88868d09c9f6aed96965016e1936ae47060d48",
+            16,
+        )
+        .unwrap();
+        let expected_r_scalar = U256::from_str_radix(
+            "0x2b698a0f0a4041b77e63488ad48c23e8e8838dd1fb7520408b121697b782ef22",
+            16,
+        )
+        .unwrap();
+        let expected_s_scalar = U256::from_str_radix(
+            "0x1dbc63bfef4416705e602a7b564161167076d8b20990a0f26f316cff2cb0bc1a",
+            16,
+        )
+        .unwrap();
+
+        // Assert the computed hash matches the expected hash from the book
+        assert_eq!(z_scalar, expected_z_scalar, "Message hash 'z' mismatch");
+
+        let n = G1AffinityPoint::N;
         let g = G1AffinityPoint::generator();
 
-        // Calculate the combined point (u*G + v*point)
-        let total_point = (g * u) + (public_key_point * v);
+        // Calculate r = (k*G).x.num
+        let r_point = g * k_scalar.into();
+        let r = r_point.x().as_u256();
+        assert_eq!(r, expected_r_scalar);
 
-        // Compare the x-coordinate of the combined point with r
-        let result = total_point.x().as_u256() == r.as_u256();
+        // Calculate k_inv = pow(k, N-2, N)
+        let k_inv = mod_exp(k_scalar, n - 2, n);
+        dbg!(k_inv);
 
-        assert!(result, "Raw verification from book example failed.");
+        // Calculate s = (z + r * e) * k_inv % N
+        let z = u256_to_biguint(z_scalar);
+        dbg!(&z);
+        let r = u256_to_biguint(r);
+        dbg!(&r);
+        let e = u256_to_biguint(private_key_scalar);
+        // dbg!(&r * &e);
+        let k_inv_big = u256_to_biguint(k_inv);
+        let mod_big = u256_to_biguint(n);
+        let s = (z + r * e) * k_inv_big % mod_big;
+        dbg!(&s);
+        let s = biguint_to_u256(s);
+
+        // Apply low-s normalization: if s > N / 2: s = N - s
+        let half_n = n / 2;
+        let s_val = s;
+        let s_final = if s_val > half_n {
+            F256K1::new(n - s_val)
+        } else {
+            s.into()
+        };
+        dbg!(s);
+
+        // Assert calculated r and s match expected values
+        // assert_eq!(r, expected_r_scalar, "Signature R value mismatch");
+        assert_eq!(
+            s_final.as_u256(),
+            expected_s_scalar,
+            "Signature S value mismatch"
+        );
+
+        println!("Signature generation from book example passed!");
+        // println!("Calculated r: 0x{:x}", r);
+        println!("Calculated s: 0x{:x}", s_final.as_u256());
     }
+    // }
 }
