@@ -62,10 +62,6 @@ impl G1AffinityPoint {
         }
     }
 
-    pub fn verify_signature(&self, message_hash: U256, signatura: &Signature) -> bool {
-        let n = G1AffinityPoint::N;
-        todo!()
-    }
 
     pub fn x(&self) -> F256K1 {
         match self {

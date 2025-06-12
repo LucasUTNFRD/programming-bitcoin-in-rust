@@ -3,6 +3,7 @@ use std::{
     ops::{Add, Mul, Neg, Sub},
 };
 
+use primitive_types::U256;
 use thiserror::Error;
 
 use super::field_element::FiniteField;
@@ -27,6 +28,11 @@ pub trait G1Point:
 {
     type Field: FiniteField; // The field containg x,y coordinates
     type SubField: FiniteField; //The scalar field for multiplication
+
+    /// the "order" of a generator point G on an elliptic curve, 
+    /// denoted as n, is the smallest positive integer such that $n \dot G=O$,
+    /// where $O$ is the "point at infinity"
+    const N:U256;
 
     /// Constructor
     fn new(x: Self::Field, y: Self::Field) -> Result<Self,Error>;

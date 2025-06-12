@@ -5,7 +5,10 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.98"
+hmac = "0.12.1"
 lazy_static = "1.5.0"
 num-bigint = "0.4.6"
 primitive-types = "0.13.1"
+rand = "0.9.1"
+sha2 = "0.10.9"
 thiserror = "2.0.12"
