@@ -9,17 +9,18 @@
 
 use std::{
     fmt::Display,
-    ops::{Add, Mul, Neg, Sub},
+    ops::{Add, Div, Mul, Neg, Sub},
 };
 
 use primitive_types::U256;
 
 use super::{
+    ecdsa::Signature,
     field_element::{FieldElement, FieldParameter, FiniteField},
     point::{Error, G1Point},
 };
 
-const SECP256K1_PRIME: U256 = U256([
+pub const SECP256K1_PRIME: U256 = U256([
     0xFFFFFFFEFFFFFC2F, // Last 64 bits
     0xFFFFFFFFFFFFFFFF, // First 64 bits (little-endian)
     0xFFFFFFFFFFFFFFFF, // Next 64 bits
@@ -38,7 +39,7 @@ impl FieldParameter for Mod {
     const MODULUS: U256 = SECP256K1_PRIME;
 }
 
-type F256K1 = FieldElement<Mod>;
+pub type F256K1 = FieldElement<Mod>;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum G1AffinityPoint {
@@ -61,6 +62,11 @@ impl G1AffinityPoint {
         }
     }
 
+    pub fn verify_signature(&self, message_hash: U256, signatura: &Signature) -> bool {
+        let n = G1AffinityPoint::N;
+        todo!()
+    }
+
     pub fn x(&self) -> F256K1 {
         match self {
             Self::Coordinate { x, y: _ } => *x,
@@ -78,7 +84,9 @@ impl G1AffinityPoint {
 
 impl G1Point for G1AffinityPoint {
     type Field = F256K1;
-    type SubField = F256K1;
+    type SubField = F256K1; //Scalar Field
+
+    const N: U256 = SECP256K1_ORDER;
 
     fn new(x: Self::Field, y: Self::Field) -> Result<Self, Error> {
         let coord = Self::Coordinate { x, y };
@@ -124,22 +132,39 @@ impl Add for G1AffinityPoint {
         match (self, rhs) {
             (_, Self::Infinity) => self,
             (Self::Infinity, _) => rhs,
+            _ if self == -rhs => G1AffinityPoint::identity(),
             _ => {
-                if self == -rhs {
-                    return G1AffinityPoint::identity();
-                }
-                let lambda = if self != rhs {
-                    ((rhs.y() - self.y()) / (rhs.x() - self.x())).unwrap()
+                // let lambda;
+                // Rule: P + P (Point Doubling)
+                let lambda = if self == rhs {
+                    // lambda = (3x^2) / (2y)
+                    let three = F256K1::new(U256::from(3));
+                    let two = F256K1::new(U256::from(2));
+                    let x_squared = self.x() * self.x();
+                    let numerator = three * x_squared;
+                    let denominator = two * self.y();
+                    numerator
+                        .div(denominator)
+                        .expect("Division by zero in point doubling (y-coordinate is zero)")
                 } else {
-                    (F256K1::new(U256::from(3)) * self.x().pow(U256::from(2))
-                        / (F256K1::new(U256::from(2)) * self.y()))
-                    .unwrap()
+                    // Rule: P1 + P2 (General point addition for distinct points)
+                    // lambda = (y2 - y1) / (x2 - x1)
+                    let numerator = rhs.y() - self.y();
+                    let denominator = rhs.x() - self.x();
+                    numerator.div(denominator).expect(
+                        "Division by zero in point addition (x-coordinates are same, not inverses)",
+                    )
                 };
 
+                // New point coordinates:
+                // x3 = lambda^2 - x1 - x2
                 let x = lambda.pow(U256::from(2)) - self.x() - rhs.x();
+                // y3 = lambda * (x1 - x3) - y1
                 let y = lambda * (self.x() - x) - self.y();
 
-                Self::Coordinate { x, y }
+                // It's important to ensure the resulting point is on the curve.
+                // The math for elliptic curve addition ensures this, so we unwrap here assuming correctness
+                G1AffinityPoint::new(x, y).unwrap()
             }
         }
     }
@@ -148,7 +173,7 @@ impl Add for G1AffinityPoint {
 impl Sub for G1AffinityPoint {
     type Output = G1AffinityPoint;
     fn sub(self, rhs: Self) -> Self::Output {
-        todo!()
+        self + (-rhs) // P - Q = P + (-Q)
     }
 }
 
@@ -173,14 +198,8 @@ impl Mul<F256K1> for G1AffinityPoint {
     type Output = G1AffinityPoint;
     fn mul(self, rhs: F256K1) -> Self::Output {
         let mut scalar = rhs.as_u256() % SECP256K1_ORDER;
-        dbg!(scalar);
-        dbg!(scalar.is_zero());
+
         if scalar.is_zero() || self.is_identity() {
-            dbg!("return infinity");
-            return Self::Infinity;
-        }
-        scalar %= SECP256K1_ORDER;
-        if scalar.is_zero() {
             return Self::Infinity;
         }
 
@@ -219,7 +238,7 @@ mod test {
     }
 
     #[test]
-    //     We can now define G directly and keep it around since we’ll be using it a lot going
+    //We can now define G directly and keep it around since we’ll be using it a lot going
     // forward:
     // G = S256Point(
     //     0x79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798,
@@ -228,17 +247,8 @@ mod test {
     // >>> from ecc import G, N
     // >>> print(N*G)
     // S256Point(infinity)
-    fn n_times_G_gives_identity() {
-        let n = U256::from_str_radix(
-            "0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141",
-            16,
-        )
-        .unwrap();
-
-        let modulo = n % n;
-        dbg!(modulo);
-        let n = F256K1::new(n);
-        dbg!(n);
+    fn n_times_g_gives_identity() {
+        let n = F256K1::new(SECP256K1_ORDER);
 
         let g = G1AffinityPoint::generator();
         let result = g * n;
