@@ -6,9 +6,11 @@ pub mod secp256k1;
 
 #[cfg(test)]
 mod test {
+    use primitive_types::U256;
+
     use crate::ecc::ecdsa::PublicKey;
 
-    use super::ecdsa::PrivateKey;
+    use super::ecdsa::{PrivateKey, Signature};
 
     #[test]
     fn exercise_1_ch4() {
@@ -33,5 +35,26 @@ mod test {
             public_key,
             PublicKey::parse_compressed(&sec_compressed).unwrap()
         );
+    }
+
+    #[test]
+    fn exercise_3_ch4() {
+        let r = U256::from_str_radix(
+            "0x37206a0610995c58074999cb9767b87af4c4978db68c06e8e6e81d282047a7c6",
+            16,
+        )
+        .unwrap();
+
+        let s = U256::from_str_radix(
+            "0x8ca63759c1157ebeaec0d03cecca119fc9a75bf8e6d0fa65c841c8e2738cdaec",
+            16,
+        )
+        .unwrap();
+
+        let signature = Signature::new(r.into(), s.into());
+        let expected_der_signature = "3045022037206a0610995c58074999cb9767b87af4c4978db68c06e8e6e81d282047a7c60221008ca63759c1157ebeaec0d03cecca119fc9a75bf8e6d0fa65c841c8e2738cdaec";
+        let der_signature = signature.serialize_der();
+        println!("{}", der_signature.len());
+        assert_eq!(hex::encode(der_signature), expected_der_signature);
     }
 }

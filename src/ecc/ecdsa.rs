@@ -28,6 +28,66 @@ impl Signature {
     pub fn new(r: F256K1, s: F256K1) -> Self {
         Self { r, s }
     }
+
+    // TODO: enconde_der_integer without vec<u8>
+
+    /// Helper function to encode a U256 into DER INTEGER format.
+    /// This produces a byte vector: [0x02, len, value_bytes].
+    fn encode_der_integer(value: U256) -> Vec<u8> {
+        let mut bytes = value.to_big_endian().to_vec(); // Start with 32 bytes (for U256)
+        // 1. Trim leading zero bytes (unless the number itself is 0, or the zero is needed for positive encoding)
+        let mut first_non_zero_idx = 0;
+        // Keep at least one byte if the number is 0 (i.e., `bytes` becomes `[0x00]`)
+        // or if `bytes` contains other non-zero values after leading zeros.
+        while first_non_zero_idx < bytes.len() - 1 && bytes[first_non_zero_idx] == 0x00 {
+            first_non_zero_idx += 1;
+        }
+        bytes = bytes[first_non_zero_idx..].to_vec();
+
+        // Handle the special case where the value itself is 0
+        if bytes.is_empty() {
+            bytes.push(0x00);
+        }
+
+        // 2. Prepend 0x00 if the most significant bit of the first byte is set.
+        // This ensures positive numbers are not interpreted as negative in DER.
+        if bytes[0] & 0x80 != 0 {
+            bytes.insert(0, 0x00);
+        }
+
+        let value_len = bytes.len();
+        let mut der_int = Vec::with_capacity(2 + value_len); // Tag + Length + Value
+
+        der_int.push(0x02); // DER INTEGER tag
+        der_int.push(value_len as u8); // Length of the integer's value (fits in one byte for U256)
+        der_int.extend_from_slice(&bytes); // Add the actual value bytes
+
+        der_int
+    }
+
+    pub fn serialize_der(&self) -> Vec<u8> {
+        // Encode r and s as DER integers
+        let r_der = Signature::encode_der_integer(self.r.as_u256());
+        let s_der = Signature::encode_der_integer(self.s.as_u256());
+
+        let total_content_len = r_der.len() + s_der.len();
+
+        let mut der_signature = Vec::new();
+        der_signature.push(0x30); // DER SEQUENCE tag
+
+        // Encode the total content length.
+        // For secp256k1 signatures, r and s are U256, max DER integer length is 33 bytes.
+        // So, r_der or s_der max length is 2 (tag+len) + 33 (value) = 35 bytes.
+        // Max total_content_len = 35 + 35 = 70 bytes.
+        // Since 70 < 128, a single byte is sufficient for the length.
+        der_signature.push(total_content_len as u8);
+
+        // Append the DER-encoded r and s integers
+        der_signature.extend_from_slice(&r_der);
+        der_signature.extend_from_slice(&s_der);
+
+        der_signature
+    }
 }
 
 /// Represents a secp256k1 private key.
