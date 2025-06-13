@@ -340,6 +340,7 @@ name = "programmign-bitcoin-in-rust"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "hex",
  "hmac",
  "num-bigint",
  "primitive-types",

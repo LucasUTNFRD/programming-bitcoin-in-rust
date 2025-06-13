@@ -15,8 +15,9 @@ use std::{
 use primitive_types::U256;
 
 use super::{
+    error::Error,
     field_element::{FieldElement, FieldParameter, FiniteField},
-    point::{Error, G1Point},
+    point::G1Point,
 };
 
 pub const SECP256K1_PRIME: U256 = U256([
@@ -29,7 +30,7 @@ pub const SECP256K1_PRIME: U256 = U256([
 const G_X_HEX: &str = "0x79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798";
 const G_Y_HEX: &str = "0x483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8";
 
-const A: U256 = U256([7, 0, 0, 0]);
+pub const A: U256 = U256([7, 0, 0, 0]);
 
 #[derive(Eq, PartialEq, Debug, Clone, Copy, PartialOrd, Ord)]
 pub struct Mod {}
@@ -73,25 +74,6 @@ impl G1AffinityPoint {
             Self::Coordinate { x: _, y } => *y,
             _ => unimplemented!(),
         }
-    }
-
-    pub fn serialize(&self) -> [u8; 33] {
-        let mut result = [0u8; 33];
-        let x_bytes = self.x().as_u256().to_big_endian();
-        result[0] = if self.y().is_even() { 0x02 } else { 0x03 };
-        result[1..33].copy_from_slice(&x_bytes);
-        result
-    }
-
-    pub fn serialize_uncompressed(&self) -> [u8; 65] {
-        let x_bytes = self.x().as_u256().to_big_endian();
-        let y_bytes = self.y().as_u256().to_big_endian();
-
-        let mut result = [0u8; 65];
-        result[0] = 0x04;
-        result[1..33].copy_from_slice(&x_bytes);
-        result[33..65].copy_from_slice(&y_bytes);
-        result
     }
 }
 

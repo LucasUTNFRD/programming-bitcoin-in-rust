@@ -3,16 +3,10 @@ use std::{
     ops::{Add, Mul, Neg, Sub},
 };
 
+use super::error::Error;
 use primitive_types::U256;
-use thiserror::Error;
 
 use super::field_element::FiniteField;
-
-#[derive(Debug, Error)]
-pub enum Error {
-    #[error("Coordinate not in curve")]
-    CoordinateNotInCurve,
-}
 
 pub trait G1Point:
     Copy                // Representation small enough for efficient copy

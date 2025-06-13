@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.98"
+hex = "0.4.3"
 hmac = "0.12.1"
 num-bigint = "0.4.6"
 primitive-types = "0.13.1"

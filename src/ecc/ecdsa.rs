@@ -3,8 +3,9 @@ use std::fmt::Display;
 use crate::ecc::point::G1Point;
 
 use super::{
+    error::Error,
     field_element::{FiniteField, biguint_to_u256, mod_exp, mul_and_mod, u256_to_biguint},
-    secp256k1::{F256K1, G1AffinityPoint},
+    secp256k1::{A, F256K1, G1AffinityPoint},
 };
 use hmac::{Hmac, Mac};
 use primitive_types::U256;
@@ -191,6 +192,61 @@ impl PublicKey {
         let v = mul_and_mod(signature.r.as_u256(), s_inv, n);
         let total = G1AffinityPoint::g() * u.into() + self.point * v.into();
         total.x() == signature.r
+    }
+
+    pub fn parse(p: &[u8; 65]) -> Result<Self, Error> {
+        if p[0] != 4 {
+            return Err(Error::InvalidPublicKey);
+        }
+        let x = U256::from_big_endian(&p[1..33]);
+        let y = U256::from_big_endian(&p[33..65]);
+
+        let point = G1AffinityPoint::new(x.into(), y.into())?;
+
+        Ok(Self { point })
+    }
+
+    pub fn parse_compressed(p: &[u8; 33]) -> Result<Self, Error> {
+        if p[0] != 0x2 && p[0] != 0x3 {
+            return Err(Error::InvalidPublicKey);
+        }
+        let is_even = p[0] == 2;
+
+        let x = F256K1::from(U256::from_big_endian(&p[1..33]));
+        let alpha = x.pow(3.into()) + F256K1::from(A);
+        let beta = alpha.sqrt();
+        let p = F256K1::modulus();
+        let (even_beta, odd_beta) = if beta.is_even() {
+            (beta, F256K1::from(p - beta.as_u256()))
+        } else {
+            (F256K1::from(p - beta.as_u256()), beta)
+        };
+        let point = if is_even {
+            G1AffinityPoint::new(x.into(), even_beta)
+        } else {
+            G1AffinityPoint::new(x.into(), odd_beta)
+        }?;
+
+        Ok(Self { point })
+    }
+
+    pub fn serialize(&self) -> [u8; 33] {
+        let mut result = [0u8; 33];
+        let x_bytes = self.point.x().as_u256().to_big_endian();
+        result[0] = if self.point.y().is_even() { 0x02 } else { 0x03 };
+        result[1..33].copy_from_slice(&x_bytes);
+        result
+    }
+
+    pub fn serialize_uncompressed(&self) -> [u8; 65] {
+        let x_bytes = self.point.x().as_u256().to_big_endian();
+        let y_bytes = self.point.y().as_u256().to_big_endian();
+
+        let mut result = [0u8; 65];
+        result[0] = 0x04;
+        result[1..33].copy_from_slice(&x_bytes);
+        result[33..65].copy_from_slice(&y_bytes);
+        result
     }
 }
 
@@ -460,5 +516,4 @@ mod test {
         // println!("Calculated r: 0x{:x}", r);
         println!("Calculated s: 0x{:x}", s_final.as_u256());
     }
-    // }
 }

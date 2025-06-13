@@ -44,6 +44,8 @@ pub trait FiniteField:
 
     fn is_even(&self) -> bool;
 
+    fn sqrt(&self) -> Self;
+
 
 
 }
@@ -142,6 +144,10 @@ impl<P: FieldParameter> FiniteField for FieldElement<P> {
         let exp = modulus - U256::from(2u64);
         let inv_value = mod_exp(self.value, exp, modulus);
         Some(Self::new(inv_value))
+    }
+
+    fn sqrt(&self) -> Self {
+        self.pow((P::MODULUS + 1) / 4)
     }
 
     fn pow(&self, exp: U256) -> Self {
