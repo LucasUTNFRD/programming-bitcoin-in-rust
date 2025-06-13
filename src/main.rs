@@ -1,7 +1,10 @@
-use ecc::ecdsa::{PrivateKey, hash256};
+use ecc::ecdsa::PrivateKey;
 use primitive_types::U256;
+use utils::hash256::hash256;
 
+mod base58;
 mod ecc;
+mod utils;
 
 fn main() {
     let e = U256::from(12345);

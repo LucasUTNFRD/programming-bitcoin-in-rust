@@ -102,7 +102,6 @@ type HmacSha256 = Hmac<Sha256>;
 impl PrivateKey {
     pub fn new(secret: U256) -> Self {
         let secret = F256K1::from(secret);
-        let g = G1AffinityPoint::g();
         Self { secret }
     }
 
@@ -145,6 +144,10 @@ impl PrivateKey {
         Some(Signature::new(r.into(), final_s.into()))
     }
 
+    pub fn serialize_wif(&self) -> Vec<u8> {
+        todo!()
+    }
+
     /// Generates a deterministic 'k' scalar for ECDSA signing according to RFC 6979.
     ///
     /// This function ensures that 'k' is unique and reproducible for a given
@@ -162,7 +165,7 @@ impl PrivateKey {
     /// that results in non-zero `r` and `s` values, or `None` if a suitable
     /// `k` could not be found after repeated attempts (though RFC 6979 ensures
     /// one is always found for valid inputs).
-    pub fn generate_deterministic_k_scalar(
+    fn generate_deterministic_k_scalar(
         private_key_scalar: U256,
         message_hash: U256,
         n: U256,
@@ -282,9 +285,9 @@ impl PublicKey {
             (F256K1::from(p - beta.as_u256()), beta)
         };
         let point = if is_even {
-            G1AffinityPoint::new(x.into(), even_beta)
+            G1AffinityPoint::new(x, even_beta)
         } else {
-            G1AffinityPoint::new(x.into(), odd_beta)
+            G1AffinityPoint::new(x, odd_beta)
         }?;
 
         Ok(Self { point })
@@ -310,24 +313,14 @@ impl PublicKey {
     }
 }
 
-///The hash256() function in Bitcoin programming contexts typically refers to double SHA256, which is used extensively in Bitcoin for security reasons. This double hashing helps prevent certain types of cryptographic attacks
-pub fn hash256(data: &[u8]) -> [u8; 32] {
-    let mut hasher = Sha256::new();
-    hasher.update(data);
-    let first_hash = hasher.finalize();
-
-    let mut hasher2 = Sha256::new();
-    hasher2.update(first_hash);
-    let double_hash = hasher2.finalize();
-
-    double_hash.into()
-}
-
 #[cfg(test)]
 mod test {
     use sha2::Digest;
 
-    use crate::ecc::field_element::{biguint_to_u256, mod_exp, mul_and_mod, u256_to_biguint};
+    use crate::{
+        ecc::field_element::{biguint_to_u256, mod_exp, mul_and_mod, u256_to_biguint},
+        utils::hash256::hash256,
+    };
 
     use super::*;
 
@@ -382,7 +375,6 @@ mod test {
         .unwrap();
 
         // Convert scalars to F256K1 field elements
-        let z = F256K1::new(z_scalar);
         let r = F256K1::new(r_scalar);
         // let s = F256K1::new(s_scalar);
         let px = F256K1::new(px_scalar);
