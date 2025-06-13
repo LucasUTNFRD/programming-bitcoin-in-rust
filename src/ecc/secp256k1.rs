@@ -15,7 +15,6 @@ use std::{
 use primitive_types::U256;
 
 use super::{
-    ecdsa::Signature,
     field_element::{FieldElement, FieldParameter, FiniteField},
     point::{Error, G1Point},
 };
@@ -62,7 +61,6 @@ impl G1AffinityPoint {
         }
     }
 
-
     pub fn x(&self) -> F256K1 {
         match self {
             Self::Coordinate { x, y: _ } => *x,
@@ -75,6 +73,25 @@ impl G1AffinityPoint {
             Self::Coordinate { x: _, y } => *y,
             _ => unimplemented!(),
         }
+    }
+
+    pub fn serialize(&self) -> [u8; 33] {
+        let mut result = [0u8; 33];
+        let x_bytes = self.x().as_u256().to_big_endian();
+        result[0] = if self.y().is_even() { 0x02 } else { 0x03 };
+        result[1..33].copy_from_slice(&x_bytes);
+        result
+    }
+
+    pub fn serialize_uncompressed(&self) -> [u8; 65] {
+        let x_bytes = self.x().as_u256().to_big_endian();
+        let y_bytes = self.y().as_u256().to_big_endian();
+
+        let mut result = [0u8; 65];
+        result[0] = 0x04;
+        result[1..33].copy_from_slice(&x_bytes);
+        result[33..65].copy_from_slice(&y_bytes);
+        result
     }
 }
 
@@ -97,7 +114,7 @@ impl G1Point for G1AffinityPoint {
         matches!(self, Self::Infinity)
     }
 
-    fn generator() -> Self {
+    fn g() -> Self {
         let gx = U256::from_str_radix(G_X_HEX, 16).unwrap();
         let gy = U256::from_str_radix(G_Y_HEX, 16).unwrap();
         Self::Coordinate {
@@ -246,21 +263,21 @@ mod test {
     fn n_times_g_gives_identity() {
         let n = F256K1::new(SECP256K1_ORDER);
 
-        let g = G1AffinityPoint::generator();
+        let g = G1AffinityPoint::g();
         let result = g * n;
         assert_eq!(result, G1AffinityPoint::Infinity)
     }
 
     #[test]
     fn test_mul_and_sum() {
-        let g = G1AffinityPoint::generator();
+        let g = G1AffinityPoint::g();
         let scalar = F256K1::new(U256::from(2));
         assert_eq!(g + g, g * scalar);
     }
 
     #[test]
     fn test_mul_and_sum_1() {
-        let g = G1AffinityPoint::generator();
+        let g = G1AffinityPoint::g();
         let scalar = F256K1::new(U256::from(3));
         assert_eq!(g + g + g, g * scalar);
     }

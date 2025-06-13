@@ -1,4 +1,4 @@
-use std::{fmt::Display, ops::Div};
+use std::fmt::Display;
 
 use crate::ecc::point::G1Point;
 
@@ -9,11 +9,12 @@ use super::{
 use hmac::{Hmac, Mac};
 use primitive_types::U256;
 use sha2::{Digest, Sha256};
+
 /// Represents an ECDSA signature, consisting of two scalar values, r and s.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Signature {
-    pub r: F256K1,
-    pub s: F256K1,
+    r: F256K1,
+    s: F256K1,
 }
 
 impl Display for Signature {
@@ -40,17 +41,14 @@ type HmacSha256 = Hmac<Sha256>;
 impl PrivateKey {
     pub fn new(secret: U256) -> Self {
         let secret = F256K1::from(secret);
-        let g = G1AffinityPoint::generator();
-        Self {
-            secret,
-            // publick_key: PublicKey::new(g * secret),
-        }
+        let g = G1AffinityPoint::g();
+        Self { secret }
     }
 
     /// Derives the public key corresponding to this private key.
     /// pubKey = privateKey * G (where G is the generator point)
     pub fn public_key(&self) -> PublicKey {
-        let generator = G1AffinityPoint::generator();
+        let generator = G1AffinityPoint::g();
         PublicKey {
             point: generator * self.secret,
         }
@@ -70,7 +68,7 @@ impl PrivateKey {
 
         let k_inv = mod_exp(k, n - 2, n);
 
-        let r = (G1AffinityPoint::generator() * k.into()).x().as_u256();
+        let r = (G1AffinityPoint::g() * k.into()).x().as_u256();
 
         // Calculate s = (z + r * e) * k_inv % N
         let z_big = u256_to_biguint(message_hash);
@@ -82,6 +80,7 @@ impl PrivateKey {
 
         let final_s = if s > n / 2 { n - s } else { s };
 
+        // TODO: we should do this until we get Some(siganture);
         Some(Signature::new(r.into(), final_s.into()))
     }
 
@@ -179,10 +178,6 @@ pub struct PublicKey {
 }
 
 impl PublicKey {
-    pub fn new(point: G1AffinityPoint) -> Self {
-        Self { point }
-    }
-
     // Add the verify_signature method here
     pub fn verify_signature(&self, message_hash: U256, signature: &Signature) -> bool {
         let n = G1AffinityPoint::N;
@@ -194,7 +189,7 @@ impl PublicKey {
         );
         let u = mul_and_mod(message_hash, s_inv, n);
         let v = mul_and_mod(signature.r.as_u256(), s_inv, n);
-        let total = G1AffinityPoint::generator() * u.into() + self.point * v.into();
+        let total = G1AffinityPoint::g() * u.into() + self.point * v.into();
         total.x() == signature.r
     }
 }
@@ -277,7 +272,7 @@ mod test {
         let px = F256K1::new(px_scalar);
         let py = F256K1::new(py_scalar);
         let n = G1AffinityPoint::N;
-        let g = G1AffinityPoint::generator();
+        let g = G1AffinityPoint::g();
         // dbg!(z, r, s, px, py);
 
         let public_key_point = G1AffinityPoint::new(px, py).expect("Point not in curve");
@@ -391,22 +386,6 @@ mod test {
     //
     #[test]
     fn test_signature_from_book() {
-        // >>> e = 12345
-        // >>> z = int.from_bytes(hash256(b'Programming Bitcoin!'), 'big')
-        // >>> k = 1234567890
-        // >>> r = (k*G).x.num
-        // >>> k_inv = pow(k, N-2, N)
-        // >>> s = (z+r*e) * k_inv % N
-        // >>> print(e*G)
-        // S256Point(f01d6b9018ab421dd410404cb869072065522bf85734008f105cf385a023a80f, \
-        // 0eba29d0f0c5408ed681984dc525982abefccd9f7ff01dd26da4999cf3f6a295)
-        // >>> print(hex(z))
-        // 0x969f6056aa26f7d2795fd013fe88868d09c9f6aed96965016e1936ae47060d48
-        // >>> print(hex(r))
-        // 0x2b698a0f0a4041b77e63488ad48c23e8e8838dd1fb7520408b121697b782ef22
-        // >>> print(hex(s))
-        // 0x1dbc63bfef4416705e602a7b564161167076d8b20990a0f26f316cff2cb0bc1a
-
         let private_key_scalar = U256::from(12345);
         let k_scalar = U256::from(1234567890);
 
@@ -435,7 +414,7 @@ mod test {
         assert_eq!(z_scalar, expected_z_scalar, "Message hash 'z' mismatch");
 
         let n = G1AffinityPoint::N;
-        let g = G1AffinityPoint::generator();
+        let g = G1AffinityPoint::g();
 
         // Calculate r = (k*G).x.num
         let r_point = g * k_scalar.into();

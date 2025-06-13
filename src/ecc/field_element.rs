@@ -41,6 +41,11 @@ pub trait FiniteField:
 
     /// Export to u256
     fn as_u256(&self) -> U256;
+
+    fn is_even(&self) -> bool;
+
+
+
 }
 
 pub trait FieldParameter: Copy + Debug {
@@ -74,7 +79,6 @@ pub fn u256_to_biguint(u: U256) -> BigUint {
 
 pub fn biguint_to_u256(b: BigUint) -> U256 {
     let bytes = b.to_bytes_be();
-    dbg!(&bytes.len());
     U256::from_big_endian(&bytes)
 }
 
@@ -106,6 +110,10 @@ impl<P: FieldParameter> From<U256> for FieldElement<P> {
 impl<P: FieldParameter> FiniteField for FieldElement<P> {
     fn modulus() -> U256 {
         P::MODULUS
+    }
+
+    fn is_even(&self) -> bool {
+        self.value.bit(0)
     }
 
     fn one() -> Self {
@@ -212,7 +220,7 @@ impl<P: FieldParameter> Mul for FieldElement<P> {
         let rhs_big = u256_to_biguint(rhs.value);
         let mod_big = u256_to_biguint(P::MODULUS);
 
-        let result_big = dbg!(self_big * rhs_big) % mod_big;
+        let result_big = (self_big * rhs_big) % mod_big;
 
         Self::new(biguint_to_u256(result_big))
     }

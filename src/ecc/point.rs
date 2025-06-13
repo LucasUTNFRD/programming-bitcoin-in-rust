@@ -38,7 +38,7 @@ pub trait G1Point:
     fn new(x: Self::Field, y: Self::Field) -> Result<Self,Error>;
 
     /// Provide generator element
-    fn generator() -> Self;
+    fn g() -> Self;
 
     /// Give the identity element
     fn identity() -> Self;
