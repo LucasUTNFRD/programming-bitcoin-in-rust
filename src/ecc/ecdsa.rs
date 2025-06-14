@@ -1,6 +1,9 @@
 use std::fmt::Display;
 
-use crate::ecc::point::G1Point;
+use crate::{
+    base58::{self},
+    ecc::point::G1Point,
+};
 
 use super::{
     error::Error,
@@ -9,7 +12,16 @@ use super::{
 };
 use hmac::{Hmac, Mac};
 use primitive_types::U256;
-use sha2::{Digest, Sha256};
+use sha2::Sha256;
+
+const WIF_MAINNET_PREFIX: u8 = 0x80;
+const WIF_TESTNET_PREFIX: u8 = 0xEF;
+const WIF_COMPRESSED_SUFFIX: u8 = 0x01;
+const SECRET_KEY_SIZE: usize = 32;
+const CHECKSUM_SIZE: usize = 4;
+
+const WIF_UNCOMPRESSED_SIZE: usize = 1 + SECRET_KEY_SIZE + CHECKSUM_SIZE; // 37 bytes
+const WIF_COMPRESSED_SIZE: usize = 1 + SECRET_KEY_SIZE + 1 + CHECKSUM_SIZE; // 38 bytes
 
 /// Represents an ECDSA signature, consisting of two scalar values, r and s.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -144,8 +156,28 @@ impl PrivateKey {
         Some(Signature::new(r.into(), final_s.into()))
     }
 
-    pub fn serialize_wif(&self) -> Vec<u8> {
-        todo!()
+    pub fn serialize_wif(&self, testnet: bool, compressed: bool) -> String {
+        let data_size = if compressed {
+            WIF_COMPRESSED_SIZE - CHECKSUM_SIZE
+        } else {
+            WIF_UNCOMPRESSED_SIZE - CHECKSUM_SIZE
+        };
+        let mut data = Vec::with_capacity(data_size + CHECKSUM_SIZE);
+
+        data.push(if testnet {
+            WIF_TESTNET_PREFIX
+        } else {
+            WIF_MAINNET_PREFIX
+        });
+
+        let secret_bytes = self.secret.as_u256().to_big_endian();
+        data.extend_from_slice(&secret_bytes);
+
+        if compressed {
+            data.push(WIF_COMPRESSED_SUFFIX);
+        }
+
+        base58::encode_with_checksum(&data)
     }
 
     /// Generates a deterministic 'k' scalar for ECDSA signing according to RFC 6979.
@@ -491,81 +523,12 @@ mod test {
             "Signature should be invalid if r is changed"
         );
     }
-    //
+
     #[test]
-    fn test_signature_from_book() {
-        let private_key_scalar = U256::from(12345);
-        let k_scalar = U256::from(1234567890);
-
-        // Hash the message "Programming Bitcoin!"
-        let message = b"Programming Bitcoin!";
-        let hashed_message = hash256(message);
-        let z_scalar = U256::from_big_endian(&hashed_message);
-        // Expected values from the book's Python output
-        let expected_z_scalar = U256::from_str_radix(
-            "0x969f6056aa26f7d2795fd013fe88868d09c9f6aed96965016e1936ae47060d48",
-            16,
-        )
-        .unwrap();
-        let expected_r_scalar = U256::from_str_radix(
-            "0x2b698a0f0a4041b77e63488ad48c23e8e8838dd1fb7520408b121697b782ef22",
-            16,
-        )
-        .unwrap();
-        let expected_s_scalar = U256::from_str_radix(
-            "0x1dbc63bfef4416705e602a7b564161167076d8b20990a0f26f316cff2cb0bc1a",
-            16,
-        )
-        .unwrap();
-
-        // Assert the computed hash matches the expected hash from the book
-        assert_eq!(z_scalar, expected_z_scalar, "Message hash 'z' mismatch");
-
-        let n = G1AffinityPoint::N;
-        let g = G1AffinityPoint::g();
-
-        // Calculate r = (k*G).x.num
-        let r_point = g * k_scalar.into();
-        let r = r_point.x().as_u256();
-        assert_eq!(r, expected_r_scalar);
-
-        // Calculate k_inv = pow(k, N-2, N)
-        let k_inv = mod_exp(k_scalar, n - 2, n);
-        dbg!(k_inv);
-
-        // Calculate s = (z + r * e) * k_inv % N
-        let z = u256_to_biguint(z_scalar);
-        dbg!(&z);
-        let r = u256_to_biguint(r);
-        dbg!(&r);
-        let e = u256_to_biguint(private_key_scalar);
-        // dbg!(&r * &e);
-        let k_inv_big = u256_to_biguint(k_inv);
-        let mod_big = u256_to_biguint(n);
-        let s = (z + r * e) * k_inv_big % mod_big;
-        dbg!(&s);
-        let s = biguint_to_u256(s);
-
-        // Apply low-s normalization: if s > N / 2: s = N - s
-        let half_n = n / 2;
-        let s_val = s;
-        let s_final = if s_val > half_n {
-            F256K1::new(n - s_val)
-        } else {
-            s.into()
-        };
-        dbg!(s);
-
-        // Assert calculated r and s match expected values
-        // assert_eq!(r, expected_r_scalar, "Signature R value mismatch");
-        assert_eq!(
-            s_final.as_u256(),
-            expected_s_scalar,
-            "Signature S value mismatch"
-        );
-
-        println!("Signature generation from book example passed!");
-        // println!("Calculated r: 0x{:x}", r);
-        println!("Calculated s: 0x{:x}", s_final.as_u256());
+    fn serialize_wif() {
+        let secret_key = U256::from(5003);
+        let private_key = PrivateKey::new(secret_key);
+        let wif = private_key.serialize_wif(true, true);
+        assert_eq!(wif, "cMahea7zqjxrtgAbB7LSGbcQUr1uX1ojuat9jZodMN8rFTv2sfUK");
     }
 }

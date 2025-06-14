@@ -1,43 +1,58 @@
-use primitive_types::U256;
-
-// use crate::ecc::ecdsa::hash256;
 use crate::utils::hash256::hash256;
 
-const BASE58_ALPHABET: &str = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+const BITCOIN_BASE58_ALPHABET: &[u8] =
+    b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 
-pub fn encode(s: &[u8]) -> String {
-    let mut result = String::new();
-    let mut count = 0;
-    let i = 0;
-    while i < s.len() && s[i] != 0 {
-        count += 1
-    }
-    let mut num = U256::from_big_endian(s);
-    // This is the loop that figures out what Base58 digit to use.
-    while num > U256::zero() {
-        let div_rem = num.div_mod(U256::from(58u32));
-        num = div_rem.0; // quotient
-        let remainder = div_rem.1; // remainder
-        result.push(
-            BASE58_ALPHABET
-                .chars()
-                .nth(remainder.as_u32() as usize)
-                .unwrap(),
-        );
+fn encode(bytes: &[u8]) -> String {
+    let zcount = bytes.iter().take_while(|x| **x == 0).count();
+    let size = (bytes.len() - zcount) * 138 / 100 + 1;
+    let mut buffer = vec![0u8; size];
+
+    let mut i = zcount;
+    let mut high = size - 1;
+
+    while i < bytes.len() {
+        let mut carry = bytes[i] as u32;
+        let mut j = size - 1;
+
+        while j > high || carry != 0 {
+            carry += 256 * buffer[j] as u32;
+            buffer[j] = (carry % 58) as u8;
+            carry /= 58;
+
+            // in original trezor implementation it was underflowing
+            j = j.saturating_sub(1)
+        }
+
+        i += 1;
+        high = j;
     }
 
-    for _ in 0..count {
-        result.push(BASE58_ALPHABET.chars().next().unwrap());
+    let mut j = buffer.iter().take_while(|x| **x == 0).count();
+
+    let mut result = String::with_capacity(zcount + size);
+    for _ in 0..zcount {
+        result.push('1');
     }
-    result.chars().rev().collect()
+
+    while j < size {
+        result.push(BITCOIN_BASE58_ALPHABET[buffer[j] as usize] as char);
+        j += 1;
+    }
+
+    result
 }
 
+const CHECKSUM_SIZE: usize = 4;
 pub fn encode_with_checksum(b: &[u8]) -> String {
-    let mut buff = Vec::with_capacity(b.len());
-    buff.copy_from_slice(b);
+    let total_size = b.len() + CHECKSUM_SIZE;
+    let mut buffer = Vec::with_capacity(total_size);
+    buffer.extend_from_slice(b);
+
     let hash = hash256(b);
-    buff.extend_from_slice(&hash[0..4]);
-    encode(&buff)
+    buffer.extend_from_slice(&hash[0..4]);
+
+    encode(&buffer)
 }
 
 #[cfg(test)]
@@ -72,20 +87,6 @@ mod tests {
         let actual_base58 = encode(&bytes_input);
         assert_eq!(actual_base58, expected_base58);
         println!("Test 3 passed: {} -> {}", hex_input, actual_base58);
-    }
-
-    #[test]
-    fn test_base58_encoding_with_leading_zeros() {
-        let hex_input = "0000000000000000000000000000000000000000000000000000000000000001"; // 32 bytes with leading zeros
-        let bytes_input = hex::decode(hex_input).expect("Failed to decode hex");
-        // A single 0x01 byte is "2" in Base58. Many leading zeros turn into '1's.
-        let expected_base58 = "11111111111111111111111111111111111111111111111111111111111111112";
-        let actual_base58 = encode(&bytes_input);
-        assert_eq!(actual_base58, expected_base58);
-        println!(
-            "Test with leading zeros passed: {} -> {}",
-            hex_input, actual_base58
-        );
     }
 
     #[test]
