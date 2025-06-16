@@ -4,6 +4,7 @@ use utils::hash256::hash256;
 
 mod base58;
 mod ecc;
+mod transactions;
 mod utils;
 
 fn main() {
