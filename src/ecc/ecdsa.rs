@@ -3,15 +3,15 @@ use std::fmt::Display;
 use crate::{
     base58::{self},
     ecc::point::G1Point,
+    error::Error,
 };
 
 use super::{
-    error::Error,
     field_element::{FiniteField, biguint_to_u256, mod_exp, mul_and_mod, u256_to_biguint},
     secp256k1::{A, F256K1, G1AffinityPoint},
 };
 use hmac::{Hmac, Mac};
-use primitive_types::U256;
+use primitive_types::{H256, U256};
 use sha2::Sha256;
 
 const WIF_MAINNET_PREFIX: u8 = 0x80;
@@ -77,6 +77,7 @@ impl Signature {
         der_int
     }
 
+    const SEQUENCE_TAG: u8 = 0x30;
     pub fn serialize_der(&self) -> Vec<u8> {
         // Encode r and s as DER integers
         let r_der = Signature::encode_der_integer(self.r.as_u256());
@@ -85,7 +86,7 @@ impl Signature {
         let total_content_len = r_der.len() + s_der.len();
 
         let mut der_signature = Vec::new();
-        der_signature.push(0x30); // DER SEQUENCE tag
+        der_signature.push(Self::SEQUENCE_TAG); // DER SEQUENCE tag
 
         // Encode the total content length.
         // For secp256k1 signatures, r and s are U256, max DER integer length is 33 bytes.
@@ -99,6 +100,68 @@ impl Signature {
         der_signature.extend_from_slice(&s_der);
 
         der_signature
+    }
+
+    pub fn parse(raw_signature: &[u8]) -> Result<Self, Error> {
+        // Check for DER sequence tag
+        if raw_signature.len() < 2 || raw_signature[0] != 0x30 {
+            return Err(Error::InvalidDER);
+        }
+        let total_len = raw_signature[1] as usize;
+        if raw_signature.len() < 2 + total_len {
+            return Err(Error::InvalidDER);
+        }
+        let mut pos = 2;
+
+        // Parse r
+        if raw_signature[pos] != 0x02 {
+            return Err(Error::InvalidDER);
+        }
+        pos += 1;
+        let r_len = raw_signature[pos] as usize;
+        pos += 1;
+        let r_bytes = &raw_signature[pos..pos + r_len];
+        pos += r_len;
+
+        // Parse s
+        if raw_signature[pos] != 0x02 {
+            return Err(Error::InvalidDER);
+        }
+        pos += 1;
+        let s_len = raw_signature[pos] as usize;
+        pos += 1;
+        let s_bytes = &raw_signature[pos..pos + s_len];
+        // pos += s_len;
+
+        // Convert r and s to U256
+        // Handle DER integers that may have leading zeros or be longer than 32 bytes
+        let r = if r_bytes.len() <= 32 {
+            let mut r_arr = [0u8; 32];
+            // Pad left with zeros if shorter than 32 bytes
+            r_arr[32 - r_bytes.len()..].copy_from_slice(r_bytes);
+            U256::from_big_endian(&r_arr)
+        } else {
+            // If longer than 32 bytes, it likely has a leading zero for DER encoding
+            // Skip leading zeros and take the last 32 bytes
+            let start_idx = r_bytes.len().saturating_sub(32);
+            let relevant_bytes = &r_bytes[start_idx..];
+            U256::from_big_endian(relevant_bytes)
+        };
+
+        let s = if s_bytes.len() <= 32 {
+            let mut s_arr = [0u8; 32];
+            // Pad left with zeros if shorter than 32 bytes
+            s_arr[32 - s_bytes.len()..].copy_from_slice(s_bytes);
+            U256::from_big_endian(&s_arr)
+        } else {
+            // If longer than 32 bytes, it likely has a leading zero for DER encoding
+            // Skip leading zeros and take the last 32 bytes
+            let start_idx = s_bytes.len().saturating_sub(32);
+            let relevant_bytes = &s_bytes[start_idx..];
+            U256::from_big_endian(relevant_bytes)
+        };
+
+        Ok(Signature::new(r.into(), s.into()))
     }
 }
 
@@ -347,18 +410,14 @@ impl PublicKey {
 
 #[cfg(test)]
 mod test {
+    use hex::ToHex;
     use sha2::Digest;
-
-    use crate::{
-        ecc::field_element::{biguint_to_u256, mod_exp, mul_and_mod, u256_to_biguint},
-        utils::hash256::hash256,
-    };
 
     use super::*;
 
     #[test]
     fn test_rfc6979_k_reproducibility() {
-        // Test that k is deterministic for the same private key and message hash
+        // Test thatsec k is deterministic for the same private key and message hash
         let private_key_scalar =
             U256::from("1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef");
         let private_key_1 = PrivateKey::new(private_key_scalar);
@@ -522,6 +581,77 @@ mod test {
             !is_bad_signature_valid,
             "Signature should be invalid if r is changed"
         );
+    }
+
+    #[test]
+    fn test_der_serialization() {
+        let r = U256::from_str_radix(
+            "0x37206a0610995c58074999cb9767b87af4c4978db68c06e8e6e81d282047a7c6",
+            16,
+        )
+        .unwrap();
+        let s = U256::from_str_radix(
+            "0x8ca63759c1157ebeaec0d03cecca119fc9a75bf8e6d0fa65c841c8e2738cdaec",
+            16,
+        )
+        .unwrap();
+
+        let sig = Signature::new(r.into(), s.into());
+
+        let serialized_der = sig.serialize_der();
+        println!("{serialized_der:?}");
+        let sig_der_serialized = hex::encode(serialized_der);
+
+        let expected_der_signature = "3045022037206a0610995c58074999cb9767b87af4c4978db68c06e8e6e81d282047a7c6022100\
+8ca63759c1157ebeaec0d03cecca119fc9a75bf8e6d0fa65c841c8e2738cdaec";
+        assert_eq!(sig_der_serialized, expected_der_signature)
+    }
+
+    #[test]
+    fn test_der_parsing() {
+        let signature_bytes = [
+            48, 69, 2, 32, 55, 32, 106, 6, 16, 153, 92, 88, 7, 73, 153, 203, 151, 103, 184, 122,
+            244, 196, 151, 141, 182, 140, 6, 232, 230, 232, 29, 40, 32, 71, 167, 198, 2, 33, 0,
+            140, 166, 55, 89, 193, 21, 126, 190, 174, 192, 208, 60, 236, 202, 17, 159, 201, 167,
+            91, 248, 230, 208, 250, 101, 200, 65, 200, 226, 115, 140, 218, 236,
+        ];
+
+        let sig_from_bytes = Signature::parse(&signature_bytes).unwrap();
+
+        let r = U256::from_str_radix(
+            "0x37206a0610995c58074999cb9767b87af4c4978db68c06e8e6e81d282047a7c6",
+            16,
+        )
+        .unwrap();
+        let s = U256::from_str_radix(
+            "0x8ca63759c1157ebeaec0d03cecca119fc9a75bf8e6d0fa65c841c8e2738cdaec",
+            16,
+        )
+        .unwrap();
+
+        let sig = Signature::new(r.into(), s.into());
+
+        assert_eq!(sig, sig_from_bytes)
+    }
+
+    #[test]
+    fn test_parse_signature() {
+        let r = U256::from_str_radix(
+            "0x37206a0610995c58074999cb9767b87af4c4978db68c06e8e6e81d282047a7c6",
+            16,
+        )
+        .unwrap();
+        let s = U256::from_str_radix(
+            "0x8ca63759c1157ebeaec0d03cecca119fc9a75bf8e6d0fa65c841c8e2738cdaec",
+            16,
+        )
+        .unwrap();
+
+        let sig = "3045022037206a0610995c58074999cb9767b87af4c4978db68c06e8e6e81d282047a7c60221008ca63759c1157ebeaec0d03cecca119fc9a75bf8e6d0fa65c841c8e2738cdaec";
+        let sig_encode = hex::decode(sig).unwrap();
+        let sig_parsed = Signature::parse(&sig_encode).unwrap();
+        assert_eq!(sig_parsed.r, r.into());
+        assert_eq!(sig_parsed.s, s.into());
     }
 
     #[test]
