@@ -3,8 +3,9 @@ use std::{
     ops::{Add, Mul, Neg, Sub},
 };
 
-use super::error::Error;
 use primitive_types::U256;
+
+use crate::error::Error;
 
 use super::field_element::FiniteField;
 

@@ -4,6 +4,8 @@ use utils::hash256::hash256;
 
 mod base58;
 mod ecc;
+pub mod error;
+mod script;
 mod transactions;
 mod utils;
 

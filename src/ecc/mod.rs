@@ -1,5 +1,4 @@
 pub mod ecdsa;
-pub mod error;
 mod field_element;
 mod point;
 pub mod secp256k1;

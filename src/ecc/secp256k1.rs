@@ -7,17 +7,15 @@
 // 0x483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8
 // • n = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141
 
+use super::{
+    field_element::{FieldElement, FieldParameter, FiniteField},
+    point::G1Point,
+};
+use crate::error::Error;
+use primitive_types::U256;
 use std::{
     fmt::Display,
     ops::{Add, Div, Mul, Neg, Sub},
-};
-
-use primitive_types::U256;
-
-use super::{
-    error::Error,
-    field_element::{FieldElement, FieldParameter, FiniteField},
-    point::G1Point,
 };
 
 pub const SECP256K1_PRIME: U256 = U256([
