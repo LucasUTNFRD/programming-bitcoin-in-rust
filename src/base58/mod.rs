@@ -1,3 +1,5 @@
+use primitive_types::U256;
+
 use crate::utils::hash256::hash256;
 
 const BITCOIN_BASE58_ALPHABET: &[u8] =
@@ -43,6 +45,32 @@ fn encode(bytes: &[u8]) -> String {
     result
 }
 
+pub fn decode(addr: String) -> [u8; 20] {
+    let mut num = U256::zero();
+    for char in addr.into_bytes() {
+        num *= 58;
+        num += BITCOIN_BASE58_ALPHABET
+            .iter()
+            .position(|c| *c == char)
+            .map(U256::from)
+            .unwrap();
+    }
+    let combined_bytes = num.to_big_endian().to_vec();
+
+    let combined = &combined_bytes[7..32];
+    let checksum = &combined[21..25];
+    let payload = &combined[0..21];
+
+    let hash = hash256(payload);
+    if &hash[0..4] != checksum {
+        panic!()
+    }
+
+    let mut result = [0u8; 20];
+    result.copy_from_slice(&payload[1..21]);
+    result
+}
+
 const CHECKSUM_SIZE: usize = 4;
 pub fn encode_with_checksum(b: &[u8]) -> String {
     let total_size = b.len() + CHECKSUM_SIZE;
@@ -57,6 +85,8 @@ pub fn encode_with_checksum(b: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
+    use crate::ecc::ecdsa::PrivateKey;
+
     use super::*;
 
     #[test]
@@ -97,5 +127,16 @@ mod tests {
         let actual_base58 = encode(&bytes_input);
         assert_eq!(actual_base58, expected_base58);
         println!("Test for zero passed: {} -> {}", hex_input, actual_base58);
+    }
+
+    #[test]
+    fn test_decode_base58() {
+        let secret_key = U256::from(5003);
+        let private_key = PrivateKey::new(secret_key);
+        let wif = private_key.serialize_wif(true, true);
+        assert_eq!(wif, "cMahea7zqjxrtgAbB7LSGbcQUr1uX1ojuat9jZodMN8rFTv2sfUK");
+
+        let addr_to_base58 = decode(wif);
+        println!("{addr_to_base58:?}");
     }
 }
