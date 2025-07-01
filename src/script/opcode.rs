@@ -1,4 +1,4 @@
-use primitive_types::U256;
+use primitive_types::{H160, U256};
 
 use crate::{
     ecc::ecdsa::{PublicKey, Signature},
@@ -11,7 +11,7 @@ use crate::{
     },
 };
 
-use super::ExecutionCtx;
+use super::{ExecutionCtx, Script, ScriptCmd};
 
 #[derive(Debug, Clone)]
 #[allow(non_camel_case_types)]
@@ -24,6 +24,21 @@ pub enum OpCode {
     OP_HASH160,
     OP_HASH256,
     OP_CHECKSIG,
+    OP_EQUALVERIFY,
+}
+
+/// Takes a 20 byte hash to a ScriptPubKey
+fn p2pkh_script(h160: H160) -> Script {
+    Script::new(Some(
+        [
+            ScriptCmd::OpCode(OpCode::OP_DUP),
+            ScriptCmd::OpCode(OpCode::OP_HASH160),
+            ScriptCmd::Push(h160.as_bytes().to_vec()),
+            ScriptCmd::OpCode(OpCode::OP_EQUALVERIFY),
+            ScriptCmd::OpCode(OpCode::OP_CHECKSIG),
+        ]
+        .to_vec(),
+    ))
 }
 
 impl OpCode {
@@ -38,6 +53,7 @@ impl OpCode {
             OP_HASH160 => 0xa9,
             OP_CHECKSIG => 0xac,
             OP_HASH256 => 0xAA,
+            OP_EQUALVERIFY => 0x88,
         }
     }
 
@@ -122,7 +138,11 @@ impl OpCode {
                 };
                 ctx.stack.push(StackItem::RawData(hashed_value.into()));
             }
+            OP_EQUALVERIFY => {
+                todo!()
+            }
         }
+
         Ok(())
     }
 }

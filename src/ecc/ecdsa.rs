@@ -1,17 +1,18 @@
-use std::fmt::Display;
-
+// #[allow(dead_code)]
+#![allow(dead_code)]
 use crate::{
     base58::{self},
     ecc::point::G1Point,
     error::Error,
 };
+use std::fmt::Display;
 
 use super::{
     field_element::{FiniteField, biguint_to_u256, mod_exp, mul_and_mod, u256_to_biguint},
     secp256k1::{A, F256K1, G1AffinityPoint},
 };
 use hmac::{Hmac, Mac};
-use primitive_types::{H256, U256};
+use primitive_types::U256;
 use sha2::Sha256;
 
 const WIF_MAINNET_PREFIX: u8 = 0x80;
@@ -19,7 +20,6 @@ const WIF_TESTNET_PREFIX: u8 = 0xEF;
 const WIF_COMPRESSED_SUFFIX: u8 = 0x01;
 const SECRET_KEY_SIZE: usize = 32;
 const CHECKSUM_SIZE: usize = 4;
-
 const WIF_UNCOMPRESSED_SIZE: usize = 1 + SECRET_KEY_SIZE + CHECKSUM_SIZE; // 37 bytes
 const WIF_COMPRESSED_SIZE: usize = 1 + SECRET_KEY_SIZE + 1 + CHECKSUM_SIZE; // 38 bytes
 
@@ -410,7 +410,6 @@ impl PublicKey {
 
 #[cfg(test)]
 mod test {
-    use hex::ToHex;
     use sha2::Digest;
 
     use super::*;
