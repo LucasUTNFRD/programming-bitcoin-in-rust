@@ -676,7 +676,7 @@ mod tests {
     #[test]
     fn test_clone_semantics() {
         let a = SmallField::new(U256::from(5));
-        let b = a.clone();
+        let b = a;
 
         assert_eq!(a, b);
     }

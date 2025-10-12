@@ -12,11 +12,21 @@ use super::{
     point::G1Point,
 };
 use crate::error::Error;
+use once_cell::sync::Lazy;
 use primitive_types::U256;
 use std::{
     fmt::Display,
     ops::{Add, Div, Mul, Neg, Sub},
 };
+
+pub static SECP256K1_G: Lazy<G1AffinityPoint> = Lazy::new(|| {
+    let gx = U256::from_str_radix(G_X_HEX, 16).unwrap();
+    let gy = U256::from_str_radix(G_Y_HEX, 16).unwrap();
+    G1AffinityPoint::Coordinate {
+        x: F256K1::new(gx),
+        y: F256K1::new(gy),
+    }
+});
 
 pub const SECP256K1_PRIME: U256 = U256([
     0xFFFFFFFEFFFFFC2F, // Last 64 bits
@@ -95,12 +105,7 @@ impl G1Point for G1AffinityPoint {
     }
 
     fn g() -> Self {
-        let gx = U256::from_str_radix(G_X_HEX, 16).unwrap();
-        let gy = U256::from_str_radix(G_Y_HEX, 16).unwrap();
-        Self::Coordinate {
-            x: F256K1::new(gx),
-            y: F256K1::new(gy),
-        }
+        *SECP256K1_G
     }
 
     fn identity() -> Self {
