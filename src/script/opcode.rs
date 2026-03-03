@@ -1,171 +1,128 @@
-use primitive_types::{H160, U256};
+use primitive_types::U256;
 
 use crate::{
     ecc::ecdsa::{PublicKey, Signature},
-    error::Error,
-    script::StackItem,
-    transactions::tx::ParseError,
-    utils::{
-        hash160::hash160,
-        hash256::{self, hash256},
-    },
+    script::{decode_num, encode_num},
+    utils::hash160::{self, hash160},
 };
 
-use super::{ExecutionCtx, Script, ScriptCmd};
-
-#[derive(Debug, Clone)]
-#[allow(non_camel_case_types)]
-pub enum OpCode {
-    OP_0,
-    OP_1,
-    OP_16,
-    OP_DUP,
-    OP_ADD,
-    OP_HASH160,
-    OP_HASH256,
-    OP_CHECKSIG,
-    OP_EQUALVERIFY,
+fn op_0(stack: &mut Vec<Vec<u8>>) -> bool {
+    stack.push(encode_num(0));
+    return true;
 }
 
-/// Takes a 20 byte hash to a ScriptPubKey
-fn p2pkh_script(h160: H160) -> Script {
-    Script::new(Some(
-        [
-            ScriptCmd::OpCode(OpCode::OP_DUP),
-            ScriptCmd::OpCode(OpCode::OP_HASH160),
-            ScriptCmd::Push(h160.as_bytes().to_vec()),
-            ScriptCmd::OpCode(OpCode::OP_EQUALVERIFY),
-            ScriptCmd::OpCode(OpCode::OP_CHECKSIG),
-        ]
-        .to_vec(),
-    ))
+fn op_1(stack: &mut Vec<Vec<u8>>) -> bool {
+    stack.push(encode_num(1));
+    return true;
+}
+fn op_2(stack: &mut Vec<Vec<u8>>) -> bool {
+    stack.push(encode_num(2));
+    return true;
+}
+pub fn op_3(stack: &mut Vec<Vec<u8>>) -> bool {
+    stack.push(encode_num(3));
+    return true;
 }
 
-impl OpCode {
-    pub fn as_byte(&self) -> u8 {
-        use OpCode::*;
-        match self {
-            OP_0 => 0x00,
-            OP_1 => 0x51,
-            OP_16 => 0x60,
-            OP_DUP => 0x76,
-            OP_ADD => 0x93,
-            OP_HASH160 => 0xa9,
-            OP_CHECKSIG => 0xac,
-            OP_HASH256 => 0xAA,
-            OP_EQUALVERIFY => 0x88,
-        }
+pub fn op_dup(stack: &mut Vec<Vec<u8>>) -> bool {
+    let Some(last_elem) = stack.last() else {
+        return false;
+    };
+
+    stack.push(last_elem.clone());
+
+    true
+}
+pub fn op_hash160_op(stack: &mut Vec<Vec<u8>>) -> bool {
+    let Some(last_elem) = stack.pop() else {
+        return false;
+    };
+
+    let hashed_elem = hash160(&last_elem).to_vec();
+    stack.push(hashed_elem);
+    true
+}
+
+pub fn op_equal(stack: &mut Vec<Vec<u8>>) -> bool {
+    if stack.len() < 2 {
+        return false;
     }
+    let a = stack.pop().expect("length checked");
+    let b = stack.pop().expect("length checked");
 
-    pub fn execute(&self, ctx: &mut ExecutionCtx, z: Option<U256>) -> Result<(), Error> {
-        use OpCode::*;
-        match self {
-            OP_0 => ctx.stack.push(StackItem::Num(0)),
-            OP_1 => ctx.stack.push(StackItem::Num(1)),
-            OP_16 => ctx.stack.push(StackItem::Num(16)),
-            OP_DUP => {
-                if ctx.stack.is_empty() {
-                    return Err(Error::EmptyStack);
-                }
-                let top = ctx.stack.last().ok_or(Error::EmptyStack)?.clone();
-                ctx.stack.push(top);
-            }
-            OP_ADD => {
-                if ctx.stack.len() < 2 {
-                    return Err(Error::InvalidStackSize);
-                }
-                let b = ctx.stack.pop().ok_or(Error::EmptyStack)?;
-                let a = ctx.stack.pop().ok_or(Error::EmptyStack)?;
-                match (a, b) {
-                    (StackItem::Num(a_val), StackItem::Num(b_val)) => {
-                        ctx.stack.push(StackItem::Num(a_val.wrapping_add(b_val)));
-                    }
-                    _ => return Err(Error::InvalidStackOperation),
-                }
-            }
-            OP_HASH160 => {
-                if ctx.stack.is_empty() {
-                    return Err(Error::EmptyStack);
-                }
-                let elem = ctx.stack.pop().ok_or(Error::EmptyStack)?;
-                let hashed_value = match elem {
-                    StackItem::Num(x) => hash160(&x.to_le_bytes()),
-                    StackItem::RawData(data) => hash160(&data),
-                };
-                ctx.stack.push(StackItem::RawData(hashed_value.into()));
-            }
-            OP_CHECKSIG => {
-                if ctx.stack.len() < 2 {
-                    return Err(Error::InvalidStackSize);
-                }
-
-                let pub_key = if let Some(StackItem::RawData(pub_key_bytes)) = ctx.stack.pop() {
-                    if pub_key_bytes.len() == 33 {
-                        let mut key_array = [0u8; 33];
-                        key_array.copy_from_slice(&pub_key_bytes);
-                        PublicKey::parse_compressed(&key_array)?
-                    } else if pub_key_bytes.len() == 65 {
-                        let mut key_array = [0u8; 65];
-                        key_array.copy_from_slice(&pub_key_bytes);
-                        PublicKey::parse(&key_array)?
-                    } else {
-                        return Err(Error::InvalidPublicKey);
-                    }
-                } else {
-                    // invalid stack item
-                    return Err(Error::InvalidStackSize);
-                };
-                let signature = if let Some(StackItem::RawData(signature_bytes)) = ctx.stack.pop() {
-                    Signature::parse(&signature_bytes)?
-                } else {
-                    return Err(Error::InvalidStackSize);
-                };
-
-                let z = z.ok_or(Error::MissingZ)?;
-                pub_key.verify_signature(z, &signature);
-                let is_valid = pub_key.verify_signature(z, &signature);
-
-                ctx.stack.push(StackItem::Num(if is_valid { 1 } else { 0 }));
-            }
-            OP_HASH256 => {
-                if ctx.stack.is_empty() {
-                    return Err(Error::EmptyStack);
-                }
-                let elem = ctx.stack.pop().ok_or(Error::EmptyStack)?;
-                let hashed_value = match elem {
-                    StackItem::Num(x) => hash256(&x.to_le_bytes()),
-                    StackItem::RawData(data) => hash256(&data),
-                };
-                ctx.stack.push(StackItem::RawData(hashed_value.into()));
-            }
-            OP_EQUALVERIFY => {
-                todo!()
-            }
-        }
-
-        Ok(())
-    }
+    let eq_result = if a == b { encode_num(1) } else { encode_num(0) };
+    stack.push(eq_result);
+    true
 }
 
-impl TryFrom<u8> for OpCode {
-    type Error = ParseError;
-    fn try_from(value: u8) -> Result<Self, Self::Error> {
-        use OpCode::*;
-        match value {
-            0x00 => Ok(OP_0),
-            0x51 => Ok(OP_1),
-            0x60 => Ok(OP_16),
-            0x76 => Ok(OP_DUP),
-            0x93 => Ok(OP_ADD),
-            0xa9 => Ok(OP_HASH160),
-            0xac => Ok(OP_CHECKSIG),
-            _ => Err(ParseError::InvalidOpCode),
-        }
-    }
+// --- OP_VERIFY: pop top, fail if zero ---
+pub fn op_verify(stack: &mut Vec<Vec<u8>>) -> bool {
+    let Some(last_elem) = stack.pop() else {
+        return false;
+    };
+
+    let decoded_value = decode_num(&last_elem);
+
+    decoded_value != 0
 }
 
-pub(crate) const OP_PUSHDATA1: u8 = 76u8;
-pub(crate) const OP_PUSHDATA2: u8 = 77u8;
-pub(crate) const OP_PUSHDATA4: u8 = 78u8;
-pub(crate) const OP_PUSHBYTES_1_START: u8 = 0x01;
-pub(crate) const OP_PUSHBYTES_75_END: u8 = 0x4b;
+pub fn op_equalverify(stack: &mut Vec<Vec<u8>>) -> bool {
+    op_equal(stack) && op_verify(stack)
+}
+
+pub fn op_add(stack: &mut Vec<Vec<u8>>) -> bool {
+    if stack.len() < 2 {
+        return false;
+    }
+    let a = stack.pop().expect("length checked");
+    let b = stack.pop().expect("length checked");
+
+    let (a, b) = (decode_num(&a), decode_num(&b));
+    stack.push(encode_num(a + b));
+
+    true
+}
+
+// check that there are at least 2 elements on the stack
+// the top element of the stack is the SEC pubkey
+// the next element of the stack is the DER signature
+// take off the last byte of the signature as that's the hash_type
+// parse the serialized pubkey and signature into objects
+// verify the signature using S256Point.verify()
+// push an encoded 1 or 0 depending on whether the signature verified
+pub fn op_checksig(stack: &mut Vec<Vec<u8>>, z: U256) -> bool {
+    if stack.len() < 2 {
+        return false;
+    }
+    let sec_pubkey = stack.pop().expect("length checked");
+    // take off the last byte of the signature as that's the hash_type
+    let der_signature_raw = stack.pop().expect("length checked");
+    let sig_bytes = &der_signature_raw[..der_signature_raw.len() - 1];
+
+    // parse the serialized signature into object
+    let Ok(signature) = Signature::parse(sig_bytes) else {
+        return false;
+    };
+
+    // parse the serialized pubkey into object
+    let pubkey: Option<PublicKey> = match sec_pubkey.first() {
+        Some(0x04) => <&[u8; 65]>::try_from(sec_pubkey.as_slice())
+            .ok()
+            .and_then(|b| PublicKey::parse(b).ok()),
+        Some(0x02) | Some(0x03) => <&[u8; 33]>::try_from(sec_pubkey.as_slice())
+            .ok()
+            .and_then(|b| PublicKey::parse_compressed(b).ok()),
+        _ => None,
+    };
+
+    let Some(pubkey) = pubkey else {
+        return false;
+    };
+
+    if pubkey.verify_signature(z, &signature) {
+        stack.push(encode_num(1));
+    } else {
+        stack.push(encode_num(0));
+    }
+    true
+}

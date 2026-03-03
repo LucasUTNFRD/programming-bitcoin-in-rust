@@ -1,6 +1,8 @@
 use sha2::{Digest, Sha256};
 
-///The hash256() function in Bitcoin programming contexts typically refers to double SHA256, which is used extensively in Bitcoin for security reasons. This double hashing helps prevent certain types of cryptographic attacks
+/// The hash256() function in Bitcoin programming contexts typically refers to double SHA256,
+/// which is used extensively in Bitcoin for security reasons.
+/// This double hashing helps prevent certain types of cryptographic attacks
 pub fn hash256(data: &[u8]) -> [u8; 32] {
     let mut hasher = Sha256::new();
     hasher.update(data);

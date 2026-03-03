@@ -1,13 +1,6 @@
-use ecc::ecdsa::PrivateKey;
 use primitive_types::U256;
-use utils::hash256::hash256;
-
-mod base58;
-mod ecc;
-pub mod error;
-mod script;
-mod transactions;
-mod utils;
+use programmign_bitcoin_in_rust::ecc::ecdsa::PrivateKey;
+use programmign_bitcoin_in_rust::utils::hash256::hash256;
 
 fn main() {
     let e = U256::from(12345);

@@ -222,7 +222,7 @@ mod test {
 
     use crate::ecc::{point::G1Point, secp256k1::SECP256K1_ORDER};
 
-    use super::{F256K1, G_X_HEX, G_Y_HEX, G1AffinityPoint};
+    use super::{G1AffinityPoint, F256K1, G_X_HEX, G_Y_HEX};
 
     #[test]
     fn test_generator_on_curve() {

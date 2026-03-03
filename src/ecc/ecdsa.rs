@@ -8,8 +8,8 @@ use crate::{
 use std::fmt::Display;
 
 use super::{
-    field_element::{FiniteField, biguint_to_u256, mod_exp, mul_and_mod, u256_to_biguint},
-    secp256k1::{A, F256K1, G1AffinityPoint},
+    field_element::{biguint_to_u256, mod_exp, mul_and_mod, u256_to_biguint, FiniteField},
+    secp256k1::{G1AffinityPoint, A, F256K1},
 };
 use hmac::{Hmac, Mac};
 use primitive_types::U256;
@@ -47,7 +47,7 @@ impl Signature {
     /// This produces a byte vector: [0x02, len, value_bytes].
     fn encode_der_integer(value: U256) -> Vec<u8> {
         let mut bytes = value.to_big_endian().to_vec(); // Start with 32 bytes (for U256)
-        // 1. Trim leading zero bytes (unless the number itself is 0, or the zero is needed for positive encoding)
+                                                        // 1. Trim leading zero bytes (unless the number itself is 0, or the zero is needed for positive encoding)
         let mut first_non_zero_idx = 0;
         // Keep at least one byte if the number is 0 (i.e., `bytes` becomes `[0x00]`)
         // or if `bytes` contains other non-zero values after leading zeros.
@@ -601,7 +601,8 @@ mod test {
         println!("{serialized_der:?}");
         let sig_der_serialized = hex::encode(serialized_der);
 
-        let expected_der_signature = "3045022037206a0610995c58074999cb9767b87af4c4978db68c06e8e6e81d282047a7c6022100\
+        let expected_der_signature =
+            "3045022037206a0610995c58074999cb9767b87af4c4978db68c06e8e6e81d282047a7c6022100\
 8ca63759c1157ebeaec0d03cecca119fc9a75bf8e6d0fa65c841c8e2738cdaec";
         assert_eq!(sig_der_serialized, expected_der_signature)
     }

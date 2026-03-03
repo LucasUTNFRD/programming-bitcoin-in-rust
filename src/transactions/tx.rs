@@ -1,13 +1,12 @@
-use std::{
-    collections::HashMap,
-    io::{Read, Write},
-    path::Display,
-};
+use std::{collections::HashMap, io::Read};
 
-use primitive_types::H256;
+use once_cell::sync::Lazy;
 use thiserror::Error;
 
-use crate::{script::Script, utils::hash256::hash256};
+use crate::{
+    script::Script,
+    utils::{hash256::hash256, varint::VarInt},
+};
 
 #[derive(Debug)]
 pub struct Transaction {
@@ -49,64 +48,8 @@ pub enum ParseError {
     InvalidVarInt,
     #[error("Invalid OpCode")]
     InvalidOpCode,
-}
-
-pub struct VarInt(pub u64);
-
-impl VarInt {
-    pub fn value(&self) -> u64 {
-        self.0
-    }
-
-    pub fn read_varint(stream: &mut impl Read) -> Result<Self, ParseError> {
-        let mut prefix = [0u8; 1];
-        stream.read_exact(&mut prefix)?;
-
-        let value = match prefix[0] {
-            0..=0xFC => prefix[0] as u64,
-            0xFD => {
-                let mut buf = [0u8; 2];
-                stream.read_exact(&mut buf)?;
-                u16::from_le_bytes(buf) as u64
-            }
-            0xFE => {
-                let mut buf = [0u8; 4];
-                stream.read_exact(&mut buf)?;
-                u32::from_le_bytes(buf) as u64
-            }
-            0xFF => {
-                let mut buf = [0u8; 8];
-                stream.read_exact(&mut buf)?;
-                u64::from_le_bytes(buf)
-            }
-        };
-
-        Ok(VarInt(value))
-    }
-
-    pub fn encode_varint(i: u64) -> Vec<u8> {
-        match i {
-            0..=0xfc => vec![i as u8],
-            0xfd..=0xffff => {
-                let mut result = Vec::with_capacity(1 + 2);
-                result.push(0xfd);
-                result.extend_from_slice(&(i as u16).to_le_bytes());
-                result
-            }
-            0x10000..=0xffffffff => {
-                let mut result = Vec::with_capacity(1 + 4);
-                result.push(0xfe);
-                result.extend_from_slice(&(i as u32).to_le_bytes());
-                result
-            }
-            _ => {
-                let mut result = Vec::with_capacity(1 + 8); // Allocate space for prefix + 8 bytes
-                result.push(0xff); // Add the prefix byte
-                result.extend_from_slice(&i.to_le_bytes());
-                result
-            }
-        }
-    }
+    #[error("parsing script failed")]
+    SyntaxError,
 }
 
 impl Transaction {
@@ -214,13 +157,7 @@ impl Transaction {
     }
 
     pub fn fee(&self) -> Amount {
-        let input_sum: u64 = self
-            .input
-            .iter()
-            .map(|tx_in| tx_in.value(self.network))
-            .sum();
-        let ouput_sum: u64 = self.output.iter().map(|tx_out| tx_out.amount).sum();
-        input_sum - ouput_sum
+        todo!()
     }
 }
 
@@ -263,7 +200,6 @@ impl TxIn {
         stream.read_exact(&mut prev_idx_bytes)?;
         let prev_tx_idx = u32::from_le_bytes(prev_idx_bytes);
 
-        // TODO: use a dedicated function for ScriptSig parsing
         let script_sig = Script::decode(stream)?;
 
         let mut sequence_bytes = [0u8; 4];
@@ -286,9 +222,13 @@ impl TxIn {
         // Previous transaction output index (4 bytes, little-endian)
         result.extend_from_slice(&self.prev_tx_idx.to_le_bytes());
 
-        // TODO:
         // ScriptSig (variable length with varint prefix)
-        // result.extend_from_slice(&self.script_sig.encode());
+        if let Some(ref script) = self.script_sig {
+            result.extend_from_slice(&script.encode());
+        } else {
+            // Empty script (length 0)
+            result.extend_from_slice(&VarInt::encode_varint(0));
+        }
 
         // Sequence (4 bytes, little-endian)
         result.extend_from_slice(&self.sequence.to_le_bytes());
@@ -318,7 +258,24 @@ impl std::fmt::Display for TxOut {
     }
 }
 
-pub type Amount = u64;
+impl std::fmt::Display for Amount {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+/// Amount in satoshis
+pub struct Amount(u64);
+
+impl Amount {
+    pub const ZERO: Amount = Amount(0);
+
+    pub fn to_bytes(&self) -> [u8; 8] {
+        self.0.to_le_bytes()
+    }
+}
+// impl Amount
 
 #[derive(Debug)]
 pub struct TxOut {
@@ -341,6 +298,7 @@ impl TxOut {
         let mut amount_bytes = [0u8; 8];
         stream.read_exact(&mut amount_bytes)?;
         let amount = u64::from_le_bytes(amount_bytes);
+        let amount = Amount(amount);
 
         // Script pubkey (variable length)
         let script_pubkey = Script::decode(stream)?;
@@ -352,7 +310,7 @@ impl TxOut {
         let mut result = Vec::new();
 
         // Amount (8 bytes, little-endian)
-        result.extend_from_slice(&self.amount.to_le_bytes());
+        result.extend_from_slice(&self.amount.to_bytes());
 
         // Script pubkey (variable length with varint prefix)
         result.extend_from_slice(&self.script_pubkey.encode());
@@ -360,6 +318,8 @@ impl TxOut {
         result
     }
 }
+
+pub static TX_FETCHER: Lazy<TxFetcher> = Lazy::new(|| TxFetcher::new());
 
 pub struct TxFetcher {
     cache: HashMap<TxID, Transaction>,
@@ -408,7 +368,7 @@ mod test {
         let mut stream = Cursor::new(raw_tx);
 
         let tx = Transaction::parse(&mut stream);
-        assert!(tx.is_ok());
+        // assert!(tx.is_ok())cc
         let transaction = tx.unwrap();
         assert_eq!(transaction.version, 1);
         assert_eq!(transaction.input.len(), 1);
